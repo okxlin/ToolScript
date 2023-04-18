@@ -4,7 +4,7 @@ rem 设置输入参数为脚本拖动到的文件路径
 set "input_file=%~1"
 
 rem 设置Python脚本的名称
-set "py_script=d2c.py"
+set "py_script=genv.py"
 
 rem 运行Python脚本生成配置文件
 echo 正在生成配置文件，请稍候...

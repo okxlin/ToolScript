@@ -2,20 +2,21 @@ import json
 import re
 import sys
 
+# 读取输入文件和输出文件名
 input_file = sys.argv[1]
 output_file = "config.json"
 
-# Read the input file
+# 读取输入文件
 with open(input_file, "r") as f:
     content = f.read()
 
-# Extract all the environment variables from the input file
+# 从输入文件中提取所有环境变量
 env_vars = re.findall(r'\$\{([^}]+)\}', content)
 
-# Initialize the formFields array
+# 初始化表单字段数组
 formFields = []
 
-# Iterate over the environment variables and add them to the formFields array
+# 遍历环境变量，并将它们添加到表单字段数组中
 for env_var in env_vars:
     formFields.append({
         "type": "text",
@@ -23,19 +24,20 @@ for env_var in env_vars:
         "labelEn": "",
         "required": True,
         "default": "",
+        "rule": "paramCommon",
         "envKey": env_var
     })
 
-# Create the final JSON object
+# 创建最终的 JSON 对象
 json_data = {
     "formFields": formFields
 }
 
-# Format the JSON data
+# 格式化 JSON 数据
 json_string = json.dumps(json_data, indent=2)
 
-# Write the formatted JSON string to the output file
+# 将格式化后的 JSON 字符串写入输出文件
 with open(output_file, "w") as f:
     f.write(json_string)
 
-print(f"Formatted JSON object written to {output_file}")
+print(f"已将格式化的 JSON 对象写入 {output_file}")
