@@ -31,7 +31,7 @@ echo y | sudo bash <(wget -qO- --no-check-certificate https://ghproxy.com/https:
 
 - 交互
 ```
-echo y | sudo bash <(wget -qO- --no-check-certificate https://ghproxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-upgrade/1panel-upgrade.sh)
+sudo bash <(wget -qO- --no-check-certificate https://ghproxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-upgrade/1panel-upgrade.sh)
 ```
 
 ## 2.2 国际网络
@@ -54,5 +54,5 @@ echo y | sudo bash <(wget -qO- --no-check-certificate https://github.com/okxlin/
 
 - 交互
 ```
-echo y | sudo bash <(wget -qO- --no-check-certificate https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-upgrade/1panel-upgrade.sh)
+sudo bash <(wget -qO- --no-check-certificate https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-upgrade/1panel-upgrade.sh)
 ```
