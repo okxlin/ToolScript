@@ -62,9 +62,21 @@ download_1panel() {
   cd ~/1pupdate-tmp
   PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/stable/latest)
   INSTALL_MODE="stable"
-  ARCH=$(dpkg --print-architecture)
-  if [ "$ARCH" = "armhf" ]; then ARCH="armv7"; fi
-  if [ "$ARCH" = "ppc64el" ]; then ARCH="ppc64le"; fi
+  osCheck=$(uname -a)
+  if [[ $osCheck =~ 'x86_64' ]]; then
+    ARCH="amd64"
+  elif [[ $osCheck =~ 'arm64' ]] || [[ $osCheck =~ 'aarch64' ]]; then
+    ARCH="arm64"
+  elif [[ $osCheck =~ 'armv7l' ]]; then
+    ARCH="armv7"
+  elif [[ $osCheck =~ 'ppc64le' ]]; then
+    ARCH="ppc64le"
+  elif [[ $osCheck =~ 's390x' ]]; then
+    ARCH="s390x"
+  else
+    echo "暂不支持的系统架构，请参阅官方文档，选择受支持的系统。"
+    exit 1
+  fi
   package_file_name="1panel-${PANELVER}-linux-${ARCH}.tar.gz"
   package_download_url="https://resource.fit2cloud.com/1panel/package/${INSTALL_MODE}/${PANELVER}/release/${package_file_name}"
   echo "正在尝试下载 ${package_download_url}"
