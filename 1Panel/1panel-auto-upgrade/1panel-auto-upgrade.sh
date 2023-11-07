@@ -117,6 +117,8 @@ download_1panel() {
     echo "正在下载备选链接 ${package_download_url}"
     curl -sSL -o ${package_file_name} "$package_download_url" || {
       echo "备选链接下载失败"
+      send_webhook_notification "Failure" "1Panel下载失败"
+      send_telegram_notification "1Panel下载失败"
       exit 1
     }
   }

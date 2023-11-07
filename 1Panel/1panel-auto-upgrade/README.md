@@ -11,7 +11,7 @@
 mkdir -p /usr/local/1panel-auto-upgrade
 
 # 使用 wget 下载脚本并保存到指定目录
-wget -O /usr/local/1panel-auto-upgrade/1panel-auto-upgrade.sh "URL_TO_YOUR_SCRIPT"
+wget -N --no-check-certificate -O /usr/local/1panel-auto-upgrade/1panel-auto-upgrade.sh "https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh"
 
 # 授予脚本执行权限
 chmod +x /usr/local/1panel-auto-upgrade/1panel-auto-upgrade.sh
@@ -46,3 +46,10 @@ HOST_REMARK="Your Host Remark"   # 添加主机备注变量
 EOF
 
 ```
+
+- 脚本链接替代
+  - https://cdn.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+
+  - https://gh-proxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+
+  - https://ghproxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
