@@ -1,0 +1,12 @@
+[Unit]
+Description=1Panel Auto Upgrade Service
+
+[Service]
+ExecStart=/usr/local/1panel-auto-upgrade/1panel-auto-upgrade.sh
+WorkingDirectory=/usr/local/1panel-auto-upgrade
+User=root
+Group=root
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
