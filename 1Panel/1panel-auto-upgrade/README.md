@@ -45,6 +45,14 @@ TELEGRAM_CHAT_ID="YOUR_TELEGRAM_CHAT_ID"  # 替换为实际的Telegram聊天ID
 HOST_REMARK="Your Host Remark"   # 添加主机备注变量
 EOF
 
+# 启动服务
+systemctl start 1panel-auto-upgrade
+
+# 查看服务状态
+systemctl status 1panel-auto-upgrade
+
+# 设置开机自启
+systemctl enable 1panel-auto-upgrade
 ```
 
 - 脚本链接替代
