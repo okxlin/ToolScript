@@ -194,9 +194,11 @@ main() {
 
     # 获取当前1Panel版本
     CURRENT_VER=$(/usr/local/bin/1panel version | awk '/1panel version:/{print $3}')
+    # 获取最新1Panel版本
+    PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/stable/latest)
 
     # 检查当前1Panel版本和已检查的版本是否一致
-    if [ "$CURRENT_VER" != "$LAST_CHECKED_VERSION" ]; then
+    if [ "$CURRENT_VER" != "$PANELVER" ]; then
       # 如果版本不匹配，执行升级操作
       download_1panel
       update_1pctl_basedir
@@ -204,7 +206,6 @@ main() {
       cleanup
       update_database
       restart_1panel
-      LAST_CHECKED_VERSION="$PANELVER"  # 更新已检查的版本
     else
       echo "1Panel 已是最新版本 $CURRENT_VER，无需升级"
     fi
