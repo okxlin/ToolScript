@@ -26,6 +26,11 @@ bash <(wget -qO- --no-check-certificate https://gh-proxy.com/https://github.com/
 bash <(wget -qO- --no-check-certificate https://gh-proxy.com/https://github.com/okxlin/ToolScript/raw/main/tools/generate-ssl.sh)
 ```
 
+### 1.6. vps初始化脚本
+```
+bash <(wget -qO- --no-check-certificate https://gh-proxy.com/https://github.com/okxlin/ToolScript/raw/main/tools/vps-setup.sh)
+```
+
 ## 2. 国际网络
 ### 2.1. 生成frp SSL证书
 ```
@@ -50,4 +55,9 @@ bash <(wget -qO- --no-check-certificate https://github.com/okxlin/ToolScript/raw
 ### 2.5. 生成简单rsa-SSL证书1
 ```
 bash <(wget -qO- --no-check-certificate https://github.com/okxlin/ToolScript/raw/main/tools/generate-ssl.sh)
+```
+
+### 2.6. vps初始化脚本
+```
+bash <(wget -qO- --no-check-certificate https://github.com/okxlin/ToolScript/raw/main/tools/vps-setup.sh)
 ```
