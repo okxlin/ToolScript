@@ -237,10 +237,10 @@ install_docker_compose() {
 # 安装常用软件
 install_utilities() {
     if command -v yum &>/dev/null; then
-        yum install -y curl wget mtr screen net-tools unzip tar lsof
+        yum install -y curl wget mtr screen net-tools zip unzip tar lsof
     elif command -v apt-get &>/dev/null; then
         apt-get update
-        apt-get install -y curl wget mtr screen net-tools unzip tar lsof
+        apt-get install -y curl wget mtr screen net-tools zip unzip tar lsof
     else
         echo "不支持的包管理器。跳过工具安装 (Unsupported package manager. Utilities installation skipped)."
     fi
