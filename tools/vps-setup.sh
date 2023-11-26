@@ -217,7 +217,7 @@ install_docker_compose() {
             fi
         else
             echo "下载docker-compose超时，使用代理重新下载... (Download timed out, retrying with proxy...)"
-            download_url="https://gh-proxy.com/$download_url"
+            download_url="https://mirror.ghproxy.com/$download_url"
             wget --no-check-certificate -O /usr/local/bin/docker-compose $download_url
             chmod +x /usr/local/bin/docker-compose
 
