@@ -40,7 +40,7 @@ echo "正在安装tzdata包..."
 $install_command
 
 # 从百度网站获取GMT时间，并提取日期和时间部分
-GMT_TIME=$(curl -I 'https://baidu.com/' 2>/dev/null | grep -i '^date:' | awk -F ' ' '{print $3 " " $4 " " $5 " " $6}')
+GMT_TIME=$(curl -I 'https://www.baidu.com/' 2>/dev/null | grep -i '^date:' | awk -F ' ' '{print $3 " " $4 " " $5 " " $6}')
 
 # 将GMT时间转换为时间戳
 GMT_TIMESTAMP=$(date -d "$GMT_TIME" '+%s')
