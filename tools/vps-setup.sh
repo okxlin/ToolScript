@@ -72,11 +72,11 @@ adjust_timezone() {
 # 调整主机名
 adjust_hostname() {
     if command -v lsb_release &>/dev/null; then
-        os_name=$(lsb_release -si)
+        os_name=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
     elif [ -f /etc/os-release ]; then
-        os_name=$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')
+        os_name=$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"' | tr '[:upper:]' '[:lower:]')
     else
-        os_name=$(uname -s)
+        os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
     fi
 
     case $os_name in
@@ -160,14 +160,29 @@ install_docker() {
             echo "必需组件安装失败 (Failed to install necessary components)."
         fi
     elif command -v apt-get &>/dev/null; then
-        # 使用官方源尝试安装Docker
-        if timeout 5 bash -c "curl -fsSL https://get.docker.com > /dev/null"; then
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sh get-docker.sh
-            if [ $? -eq 0 ]; then
-                echo "Docker安装成功 (Docker installed successfully)."
+        # 检查Docker是否已安装
+        if command -v docker &>/dev/null; then
+            echo "Docker已经安装 (Docker is already installed)."
+        else
+            # 使用官方源尝试安装Docker
+            if timeout 5 bash -c "curl -fsSL https://get.docker.com > /dev/null"; then
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sh get-docker.sh
+                if [ $? -eq 0 ]; then
+                    echo "Docker安装成功 (Docker installed successfully)."
+                else
+                    # 使用阿里云镜像安装Docker
+                    curl -fsSL https://get.docker.com -o get-docker.sh
+                    sh get-docker.sh --mirror Aliyun
+                    if [ $? -eq 0 ]; then
+                        echo "Docker安装成功 (Docker installed successfully)."
+                    else
+                        echo "Docker安装失败 (Failed to install Docker)."
+                    fi
+                fi
+                rm get-docker.sh
             else
-                # 使用阿里云镜像安装Docker
+                echo "无法连接官方源，尝试使用阿里云镜像安装Docker (Failed to connect to official source, trying installation using Aliyun mirror)."
                 curl -fsSL https://get.docker.com -o get-docker.sh
                 sh get-docker.sh --mirror Aliyun
                 if [ $? -eq 0 ]; then
@@ -175,18 +190,8 @@ install_docker() {
                 else
                     echo "Docker安装失败 (Failed to install Docker)."
                 fi
+                rm get-docker.sh
             fi
-            rm get-docker.sh
-        else
-            echo "无法连接官方源，尝试使用阿里云镜像安装Docker (Failed to connect to official source, trying installation using Aliyun mirror)."
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sh get-docker.sh --mirror Aliyun
-            if [ $? -eq 0 ]; then
-                echo "Docker安装成功 (Docker installed successfully)."
-            else
-                echo "Docker安装失败 (Failed to install Docker)."
-            fi
-            rm get-docker.sh
         fi
     else
         echo "不支持的包管理器。跳过Docker安装 (Unsupported package manager. Docker installation skipped)."
@@ -248,6 +253,35 @@ install_utilities() {
     echo "常用工具已安装 (Utilities installed)."
 }
 
+
+# 检测组件和设置是否正确
+check_components() {
+    # 定义要检查的软件列表
+    components=("docker" "docker-compose" "curl" "wget" "mtr" "screen" "net-tools" "zip" "unzip" "tar" "lsof")
+
+    # 遍历检查软件是否安装
+    for component in "${components[@]}"; do
+        if command -v "$component" &>/dev/null; then
+            echo "$component 已正确安装 ($component is correctly installed)."
+        else
+            echo "警告：$component 未正确安装 (Warning: $component is not correctly installed)."
+        fi
+    done
+
+    # 检测当前时间是否正确
+    current_time=$(date)
+    echo "当前时间为：$current_time (Current time is: $current_time)"
+
+    # 检测BBR是否正确启用
+    bbr_status=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+    if [ "$bbr_status" = "bbr" ]; then
+        echo "BBR 已正确启用 (BBR is correctly enabled)."
+    else
+        echo "警告：BBR 未正确启用 (Warning: BBR is not correctly enabled)."
+    fi
+}
+
+
 # 执行函数
 check_root
 install_utilities
@@ -257,6 +291,9 @@ enable_bbr
 adjust_hostname
 install_docker
 install_docker_compose
+
+# 检查组件和设置是否正确
+check_components
 
 echo "设置完成 (Setup complete)."
 bash -l
