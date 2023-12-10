@@ -257,7 +257,7 @@ install_utilities() {
 # 检测组件和设置是否正确
 check_components() {
     # 定义要检查的软件列表
-    components=("docker" "docker-compose" "curl" "wget" "mtr" "screen" "net-tools" "zip" "unzip" "tar" "lsof")
+    components=("docker" "docker-compose" "curl" "wget" "mtr" "screen" "zip" "unzip" "tar" "lsof")
 
     # 遍历检查软件是否安装
     for component in "${components[@]}"; do
