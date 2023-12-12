@@ -99,102 +99,207 @@ adjust_hostname() {
 }
 
 
-# 安装docker
+# 安装 Docker
 install_docker() {
-    if command -v yum &>/dev/null; then
-        yum install -y yum-utils device-mapper-persistent-data lvm2
-        if [ $? -eq 0 ]; then
-            echo "必需组件安装成功 (Necessary components installed successfully)."
-            
-            # 测试官方源的延迟
-            official_source="download.docker.com"
-            official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
-
-            # 测试 mirrors.nju.edu.cn/docker-ce 的延迟
-            mirror_source="mirrors.nju.edu.cn/docker-ce"
-            mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
-            
-            echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
-            echo "镜像源延迟为: $mirror_delay 秒 (Mirror source latency: $mirror_delay seconds)"
-            
-            # 比较延迟并选择延迟较低的源
-            if (( $(echo "$official_delay < $mirror_delay" | bc -l) )); then
-                echo "官方源延迟更低，选择官方源。(Official source has lower latency, selecting official source.)"
-                chosen_source=$official_source
-            else
-                echo "镜像源延迟更低，选择镜像源。(Mirror source has lower latency, selecting mirror source.)"
-                chosen_source=$mirror_source
-            fi
-            
-            yum-config-manager --add-repo https://$chosen_source/linux/centos/docker-ce.repo
-            if [ $? -eq 0 ]; then
-                echo "Docker源添加成功 (Docker repository added successfully)."
-                yum install -y docker-ce docker-ce-cli containerd.io
-                if [ $? -eq 0 ]; then
-                    echo "Docker安装成功 (Docker installed successfully)."
-                    
-                    # 启动 Docker 服务
-                    systemctl start docker
-                    
-                    if [ $? -eq 0 ]; then
-                        echo "Docker服务已启动 (Docker service started)."
-                        
-                        # 设置 Docker 服务在系统启动时自动启动
-                        systemctl enable docker
-                        
-                        if [ $? -eq 0 ]; then
-                            echo "Docker已设置为开机自启 (Docker set to start on boot)."
-                        else
-                            echo "无法设置Docker为开机自启 (Failed to set Docker to start on boot)."
-                        fi
-                    else
-                        echo "无法启动Docker服务 (Failed to start Docker service)."
-                    fi
-                else
-                    echo "Docker安装失败 (Failed to install Docker)."
-                fi
-            else
-                echo "无法添加Docker源 (Failed to add Docker repository)."
-            fi
+    install_docker_with_docker_shell
+    if ! command -v docker &>/dev/null; then
+        echo "尝试使用官方脚本安装失败，尝试使用包管理器安装 Docker (Failed to install using official script, trying package manager)..."
+        
+        if command -v yum &>/dev/null; then
+            echo "使用 yum 包管理器安装 Docker (Installing Docker using yum package manager)..."
+            install_docker_with_yum_package_manager
+        elif command -v apt-get &>/dev/null; then
+            echo "使用 apt 包管理器安装 Docker (Installing Docker using apt package manager)..."
+            install_docker_with_apt_package_manager
         else
-            echo "必需组件安装失败 (Failed to install necessary components)."
+            echo "无法找到适合的包管理器来安装 Docker (Unable to find suitable package manager to install Docker)."
+            echo "请手动安装 Docker 或者尝试其他安装方式 (Please install Docker manually or try another installation method)."
         fi
-    elif command -v apt-get &>/dev/null; then
-        # 检查Docker是否已安装
-        if command -v docker &>/dev/null; then
-            echo "Docker已经安装 (Docker is already installed)."
-        else
-            # 使用官方源尝试安装Docker
-            if timeout 5 bash -c "curl -fsSL https://get.docker.com > /dev/null"; then
-                curl -fsSL https://get.docker.com -o get-docker.sh
-                sh get-docker.sh
-                if [ $? -eq 0 ]; then
-                    echo "Docker安装成功 (Docker installed successfully)."
-                else
-                    # 使用阿里云镜像安装Docker
-                    curl -fsSL https://get.docker.com -o get-docker.sh
-                    sh get-docker.sh --mirror Aliyun
-                    if [ $? -eq 0 ]; then
-                        echo "Docker安装成功 (Docker installed successfully)."
-                    else
-                        echo "Docker安装失败 (Failed to install Docker)."
-                    fi
-                fi
-                rm get-docker.sh
-            else
-                echo "无法连接官方源，尝试使用阿里云镜像安装Docker (Failed to connect to official source, trying installation using Aliyun mirror)."
-                curl -fsSL https://get.docker.com -o get-docker.sh
-                sh get-docker.sh --mirror Aliyun
-                if [ $? -eq 0 ]; then
-                    echo "Docker安装成功 (Docker installed successfully)."
-                else
-                    echo "Docker安装失败 (Failed to install Docker)."
-                fi
-                rm get-docker.sh
+    fi
+}
+
+
+# 从docker官方脚本安装 Docker
+install_docker_with_docker_shell() {
+    if command -v docker &>/dev/null; then
+        echo "Docker已经安装 (Docker is already installed)."
+    else
+        # 镜像源列表
+        sources=(
+            "https://mirrors.aliyun.com/docker-ce"
+            "https://download.docker.com"
+        )
+
+        # 获取延迟函数
+        get_delay() {
+            local source=$1
+            local delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+            echo "$delay"
+        }
+
+        # 获取各镜像源的延迟
+        delays=()
+        for source in "${sources[@]}"; do
+            delay=$(get_delay "$source")
+            delays+=("$delay")
+        done
+
+        # 找到延迟最小的镜像源索引
+        min_delay_index=0
+        min_delay=${delays[0]}
+        for i in "${!delays[@]}"; do
+            if (( $(awk 'BEGIN { print '"${delays[i]}"' < '"$min_delay"' }') )); then
+                min_delay=${delays[i]}
+                min_delay_index=$i
             fi
+        done
+
+        if (( $min_delay_index == 0 )); then
+            echo "选择 Aliyun 镜像源，延迟为 $min_delay 秒 (Selecting Aliyun mirror with a delay of $min_delay seconds)."
+            curl -fsSL "https://get.docker.com" -o get-docker.sh
+            sh get-docker.sh --mirror Aliyun
+        else
+            echo "选择 Docker 官方源，延迟为 $min_delay 秒 (Selecting Docker Official mirror with a delay of $min_delay seconds)."
+            curl -fsSL "https://get.docker.com" -o get-docker.sh
+            sh get-docker.sh
+        fi
+
+        if [ $? -eq 0 ]; then
+            echo "Docker安装成功 (Docker installed successfully)."
+        else
+            echo "Docker安装失败 (Failed to install Docker)."
+        fi
+    fi
+}
+
+
+# 从包管理器安装 Docker（针对 yum）
+install_docker_with_yum_package_manager() {
+    yum install -y yum-utils device-mapper-persistent-data lvm2
+    if [ $? -eq 0 ]; then
+        echo "必需组件安装成功 (Necessary components installed successfully)."
+        
+        # 测试官方源的延迟
+        official_source="download.docker.com"
+        official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
+
+        # 测试 mirrors.nju.edu.cn/docker-ce 的延迟
+        mirror_source="mirrors.nju.edu.cn/docker-ce"
+        mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
+        
+        echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
+        echo "镜像源延迟为: $mirror_delay 秒 (Mirror source latency: $mirror_delay seconds)"
+        
+        # 比较延迟并选择延迟较低的源
+        if (( $(echo "$official_delay < $mirror_delay" | bc -l) )); then
+            echo "官方源延迟更低，选择官方源。(Official source has lower latency, selecting official source.)"
+            chosen_source=$official_source
+        else
+            echo "镜像源延迟更低，选择镜像源。(Mirror source has lower latency, selecting mirror source.)"
+            chosen_source=$mirror_source
+        fi
+        
+        yum-config-manager --add-repo https://$chosen_source/linux/centos/docker-ce.repo
+        if [ $? -eq 0 ]; then
+            echo "Docker源添加成功 (Docker repository added successfully)."
+            yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin
+            if [ $? -eq 0 ]; then
+                echo "Docker安装成功 (Docker installed successfully)."
+                
+                # 启动 Docker 服务
+                systemctl start docker
+                
+                if [ $? -eq 0 ]; then
+                    echo "Docker服务已启动 (Docker service started)."
+                    
+                    # 设置 Docker 服务在系统启动时自动启动
+                    systemctl enable docker
+                    
+                    if [ $? -eq 0 ]; then
+                        echo "Docker已设置为开机自启 (Docker set to start on boot)."
+                    else
+                        echo "无法设置Docker为开机自启 (Failed to set Docker to start on boot)."
+                    fi
+                else
+                    echo "无法启动Docker服务 (Failed to start Docker service)."
+                fi
+            else
+                echo "Docker安装失败 (Failed to install Docker)."
+            fi
+        else
+            echo "无法添加Docker源 (Failed to add Docker repository)."
         fi
     else
-        echo "不支持的包管理器。跳过Docker安装 (Unsupported package manager. Docker installation skipped)."
+        echo "必需组件安装失败 (Failed to install necessary components)."
+    fi
+}
+
+
+# 从包管理器安装 Docker（针对 apt）
+install_docker_with_apt_package_manager() {
+    apt-get update
+    apt-get install -y \
+        apt-transport-https \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release
+
+    if [ $? -eq 0 ]; then
+        echo "必需组件安装成功 (Necessary components installed successfully)."
+
+        # 测试官方源的延迟
+        official_source="download.docker.com"
+        official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
+
+        # 测试 mirrors.nju.edu.cn/docker-ce 的延迟
+        mirror_source="mirrors.nju.edu.cn/docker-ce"
+        mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
+        
+        echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
+        echo "镜像源延迟为: $mirror_delay 秒 (Mirror source latency: $mirror_delay seconds)"
+        
+        # 比较延迟并选择延迟较低的源
+        if (( $(echo "$official_delay < $mirror_delay" | bc -l) )); then
+            echo "官方源延迟更低，选择官方源。(Official source has lower latency, selecting official source.)"
+            chosen_source=$official_source
+        else
+            echo "镜像源延迟更低，选择镜像源。(Mirror source has lower latency, selecting mirror source.)"
+            chosen_source=$mirror_source
+        fi
+
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://$chosen_source/linux/ubuntu \
+            $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin
+
+        if [ $? -eq 0 ]; then
+            echo "Docker安装成功 (Docker installed successfully)."
+
+            systemctl start docker
+
+            if [ $? -eq 0 ]; then
+                echo "Docker服务已启动 (Docker service started)."
+
+                systemctl enable docker
+
+                if [ $? -eq 0 ]; then
+                    echo "Docker已设置为开机自启 (Docker set to start on boot)."
+                else
+                    echo "无法设置Docker为开机自启 (Failed to set Docker to start on boot)."
+                fi
+            else
+                echo "无法启动Docker服务 (Failed to start Docker service)."
+            fi
+        else
+            echo "Docker安装失败 (Failed to install Docker)."
+        fi
+    else
+        echo "必需组件安装失败 (Failed to install necessary components)."
     fi
 }
 
