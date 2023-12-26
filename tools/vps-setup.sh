@@ -124,50 +124,53 @@ install_docker_with_docker_shell() {
     if command -v docker &>/dev/null; then
         echo "Docker已经安装 (Docker is already installed)."
     else
-        # 镜像源列表
         sources=(
             "https://mirrors.aliyun.com/docker-ce"
+            "https://mirrors.tencent.com/docker-ce"
+            "https://mirrors.163.com/docker-ce"
+            "https://mirrors.cernet.edu.cn/docker-ce"
             "https://download.docker.com"
         )
 
-        # 获取延迟函数
-        get_delay() {
+        get_average_delay() {
             local source=$1
-            local delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
-            echo "$delay"
+            local total_delay=0
+            local iterations=3
+
+            for ((i = 0; i < iterations; i++)); do
+                delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+                total_delay=$(awk "BEGIN {print $total_delay + $delay}")
+            done
+
+            average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
+            echo "$average_delay"
         }
 
-        # 获取各镜像源的延迟
-        delays=()
-        for source in "${sources[@]}"; do
-            delay=$(get_delay "$source")
-            delays+=("$delay")
-        done
+        min_delay=${#sources[@]}
+        selected_source=""
 
-        # 找到延迟最小的镜像源索引
-        min_delay_index=0
-        min_delay=${delays[0]}
-        for i in "${!delays[@]}"; do
-            if (( $(awk 'BEGIN { print '"${delays[i]}"' < '"$min_delay"' }') )); then
-                min_delay=${delays[i]}
-                min_delay_index=$i
+        for source in "${sources[@]}"; do
+            average_delay=$(get_average_delay "$source")
+
+            if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
+                min_delay=$average_delay
+                selected_source=$source
             fi
         done
 
-        if (( $min_delay_index == 0 )); then
-            echo "选择 Aliyun 镜像源，延迟为 $min_delay 秒 (Selecting Aliyun mirror with a delay of $min_delay seconds)."
-            curl -fsSL "https://get.docker.com" -o get-docker.sh
-            sh get-docker.sh --mirror Aliyun
-        else
-            echo "选择 Docker 官方源，延迟为 $min_delay 秒 (Selecting Docker Official mirror with a delay of $min_delay seconds)."
+        if [ -n "$selected_source" ]; then
+            echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
+            export DOWNLOAD_URL="$selected_source"
             curl -fsSL "https://get.docker.com" -o get-docker.sh
             sh get-docker.sh
-        fi
 
-        if [ $? -eq 0 ]; then
-            echo "Docker安装成功 (Docker installed successfully)."
+            if [ $? -eq 0 ]; then
+                echo "Docker安装成功 (Docker installed successfully)."
+            else
+                echo "Docker安装失败 (Failed to install Docker)."
+            fi
         else
-            echo "Docker安装失败 (Failed to install Docker)."
+            echo "无法选择源进行安装 (Unable to select a source for installation)."
         fi
     fi
 }
@@ -183,8 +186,8 @@ install_docker_with_yum_package_manager() {
         official_source="download.docker.com"
         official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
 
-        # 测试 mirrors.nju.edu.cn/docker-ce 的延迟
-        mirror_source="mirrors.nju.edu.cn/docker-ce"
+        # 测试 mirrors.cernet.edu.cn/docker-ce 的延迟
+        mirror_source="mirrors.cernet.edu.cn/docker-ce"
         mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
         
         echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
@@ -252,8 +255,8 @@ install_docker_with_apt_package_manager() {
         official_source="download.docker.com"
         official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
 
-        # 测试 mirrors.nju.edu.cn/docker-ce 的延迟
-        mirror_source="mirrors.nju.edu.cn/docker-ce"
+        # 测试 mirrors.cernet.edu.cn/docker-ce 的延迟
+        mirror_source="mirrors.cernet.edu.cn/docker-ce"
         mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
         
         echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
