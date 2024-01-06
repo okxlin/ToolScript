@@ -1,21 +1,24 @@
 #!/bin/bash
 
-# 提示用户输入域名或IP
-read -p "请输入域名或IP: " name
+# 提示用户输入域名列表或IP列表（以逗号分隔）
+read -p "请输入域名列表或IP列表（以逗号分隔）: " input_list
 
-# 提示用户输入SSL证书的有效期（默认为100年）
-read -p "请输入SSL证书有效期天数（默认为100年，即36500天）: " ssl_days
-ssl_days=${ssl_days:-36500}  # 如果用户未输入，则使用默认值36500天（100年）
+# 将逗号分隔的域名或IP列表转换为数组
+IFS=',' read -ra input_array <<< "$input_list"
 
-# 检查用户输入是否为IP地址
-if [[ $name =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  subject_alt_name="IP:${name}"
-else
-  subject_alt_name="DNS:${name}"
-fi
+# 生成 subjectAltName 字段的内容
+san_entries=()
+for domain_or_ip in "${input_array[@]}"; do
+  if [[ $domain_or_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    san_entries+=("IP:${domain_or_ip}")
+  else
+    san_entries+=("DNS:${domain_or_ip}")
+  fi
+done
+subject_alt_name=$(IFS=','; echo "${san_entries[*]}")
 
-# 生成的文件夹名称，添加"ECC"标志
-cert_dir="${name}-ssl-ecc"
+# 使用第一个输入项作为文件夹名称
+cert_dir="${input_array[0]}-ssl-ecc"
 
 # 检查是否存在旧的文件夹，如果存在，向用户进行确认
 if [ -d "$cert_dir" ]; then
@@ -35,7 +38,7 @@ mkdir -p "$cert_dir"
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/CA.key"
 
 # 创建CA自签名证书
-openssl req -new -x509 -days "$ssl_days" -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${name}"
+openssl req -new -x509 -days 3650 -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${domains[0]}"
 
 # 创建证书的ECDSA私钥
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/private.key"
@@ -45,7 +48,7 @@ read -s -p "请输入 PKCS#12 格式证书密码: " password
 echo
 
 # 创建证书请求文件 csr
-openssl req -new -key "$cert_dir/private.key" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${name}" -sha256 -out "$cert_dir/private.csr"
+openssl req -new -key "$cert_dir/private.key" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${domains[0]}" -sha256 -out "$cert_dir/private.csr"
 
 # 生成 private.ext 文件
 cat <<EOF > "$cert_dir/private.ext"
@@ -60,14 +63,14 @@ countryName = US
 stateOrProvinceName = California
 localityName = Los Angeles
 organizationName = My Organization
-commonName = ${name}
+commonName = ${domains[0]}
 
 [SAN]
 subjectAltName = ${subject_alt_name}
 EOF
 
 # 使用 CSR 文件和 private.ext、以及根证书 CA.crt 创建证书 private.crt
-openssl x509 -req -days "$ssl_days" -in "$cert_dir/private.csr" -CA "$cert_dir/CA.crt" -CAkey "$cert_dir/CA.key" -CAcreateserial -sha256 -out "$cert_dir/private.crt" -extfile "$cert_dir/private.ext" -extensions SAN
+openssl x509 -req -days 3650 -in "$cert_dir/private.csr" -CA "$cert_dir/CA.crt" -CAkey "$cert_dir/CA.key" -CAcreateserial -sha256 -out "$cert_dir/private.crt" -extfile "$cert_dir/private.ext" -extensions SAN
 
 # 生成 Fullchain 证书文件
 cat "$cert_dir/private.crt" "$cert_dir/CA.crt" > "$cert_dir/fullchain.crt"
