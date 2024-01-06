@@ -38,7 +38,7 @@ mkdir -p "$cert_dir"
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/CA.key"
 
 # 创建CA自签名证书
-openssl req -new -x509 -days 3650 -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${domains[0]}"
+openssl req -new -x509 -days 3650 -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${input_array[0]}"
 
 # 创建证书的ECDSA私钥
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/private.key"
@@ -48,7 +48,7 @@ read -s -p "请输入 PKCS#12 格式证书密码: " password
 echo
 
 # 创建证书请求文件 csr
-openssl req -new -key "$cert_dir/private.key" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${domains[0]}" -sha256 -out "$cert_dir/private.csr"
+openssl req -new -key "$cert_dir/private.key" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${input_array[0]}" -sha256 -out "$cert_dir/private.csr"
 
 # 生成 private.ext 文件
 cat <<EOF > "$cert_dir/private.ext"
@@ -63,7 +63,7 @@ countryName = US
 stateOrProvinceName = California
 localityName = Los Angeles
 organizationName = My Organization
-commonName = ${domains[0]}
+commonName = ${input_array[0]}
 
 [SAN]
 subjectAltName = ${subject_alt_name}
