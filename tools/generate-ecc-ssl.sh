@@ -20,6 +20,10 @@ subject_alt_name=$(IFS=','; echo "${san_entries[*]}")
 # 使用第一个输入项作为文件夹名称
 cert_dir="${input_array[0]}-ssl-ecc"
 
+# 提示用户输入SSL证书的有效期（默认为100年）
+read -p "请输入SSL证书有效期天数（默认为100年，即36500天）: " ssl_days
+ssl_days=${ssl_days:-36500}  # 如果用户未输入，则使用默认值36500天（100年）
+
 # 检查是否存在旧的文件夹，如果存在，向用户进行确认
 if [ -d "$cert_dir" ]; then
   read -p "发现旧的文件夹 '$cert_dir'，是否确认删除并继续 (y/n)? " confirm
@@ -37,8 +41,8 @@ mkdir -p "$cert_dir"
 # 创建CA私钥（使用ECDSA算法）
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/CA.key"
 
-# 创建CA自签名证书
-openssl req -new -x509 -days 3650 -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${input_array[0]}"
+# 创建CA自签名证书（将-days参数替换为${ssl_days}）
+openssl req -new -x509 -days "${ssl_days}" -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${input_array[0]}"
 
 # 创建证书的ECDSA私钥
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/private.key"
@@ -69,8 +73,8 @@ commonName = ${input_array[0]}
 subjectAltName = ${subject_alt_name}
 EOF
 
-# 使用 CSR 文件和 private.ext、以及根证书 CA.crt 创建证书 private.crt
-openssl x509 -req -days 3650 -in "$cert_dir/private.csr" -CA "$cert_dir/CA.crt" -CAkey "$cert_dir/CA.key" -CAcreateserial -sha256 -out "$cert_dir/private.crt" -extfile "$cert_dir/private.ext" -extensions SAN
+# 使用 CSR 文件和 private.ext、以及根证书 CA.crt 创建证书 private.crt（将-days参数替换为${ssl_days}）
+openssl x509 -req -days "${ssl_days}" -in "$cert_dir/private.csr" -CA "$cert_dir/CA.crt" -CAkey "$cert_dir/CA.key" -CAcreateserial -sha256 -out "$cert_dir/private.crt" -extfile "$cert_dir/private.ext" -extensions SAN
 
 # 生成 Fullchain 证书文件
 cat "$cert_dir/private.crt" "$cert_dir/CA.crt" > "$cert_dir/fullchain.crt"
