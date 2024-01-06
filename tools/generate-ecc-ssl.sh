@@ -32,13 +32,13 @@ fi
 mkdir -p "$cert_dir"
 
 # 创建CA私钥（使用ECDSA算法）
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$cert_dir/CA.key"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/CA.key"
 
 # 创建CA自签名证书
 openssl req -new -x509 -days "$ssl_days" -key "$cert_dir/CA.key" -out "$cert_dir/CA.crt" -subj "/C=US/ST=California/L=Los Angeles/O=My Organization/CN=${name}"
 
 # 创建证书的ECDSA私钥
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$cert_dir/private.key"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-521 -out "$cert_dir/private.key"
 
 # 提示用户输入 PKCS#12 格式证书密码
 read -s -p "请输入 PKCS#12 格式证书密码: " password
