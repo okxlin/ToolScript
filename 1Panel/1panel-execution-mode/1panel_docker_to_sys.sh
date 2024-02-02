@@ -38,9 +38,9 @@ check_and_install_dependencies() {
 
 # 函数：创建目录
 create_dir() {
-    1PANEL_DIR=~/1panel-install-dir
-    mkdir -p ${1PANEL_DIR}
-    cd ${1PANEL_DIR}
+    PANEL_DIR=~/1panel-install-dir
+    mkdir -p ${PANEL_DIR}
+    cd ${PANEL_DIR}
 }
 
 # 函数：下载 1Panel
@@ -104,7 +104,7 @@ download_1panel() {
         rm -f ${package_file_name}
         return 1
     fi
-
+    cd ${PANEL_DIR}
     tar zxvf ${package_file_name} --strip-components 1
     if [ $? != 0 ]; then
         echo "解压安装包失败，请稍候重试。"
@@ -115,9 +115,9 @@ download_1panel() {
 
 # 函数：安装 1Panel
 install_1panel() {
-    cp ${1PANEL_DIR}/1panel /usr/local/bin && chmod +x /usr/local/bin/1panel
-    cp ${1PANEL_DIR}/1pctl /usr/local/bin && chmod +x /usr/local/bin/1pctl
-    cp ${1PANEL_DIR}/1panel.service /etc/systemd/system
+    cp ${PANEL_DIR}/1panel /usr/local/bin && chmod +x /usr/local/bin/1panel
+    cp ${PANEL_DIR}/1pctl /usr/local/bin && chmod +x /usr/local/bin/1pctl
+    cp ${PANEL_DIR}/1panel.service /etc/systemd/system
     if [[ ! -f /usr/bin/1pctl ]]; then
         ln -s /usr/local/bin/1pctl /usr/bin/1pctl >/dev/null 2>&1
     fi
@@ -150,10 +150,10 @@ check_database_and_remove_container() {
     echo "已创建的 Docker 容器及其对应镜像："
     docker ps -a --format "table {{.Names}}\t{{.Image}}"
 
-    read -p "请输入要移除的 1Panel 容器名（默认为 '1Panel'，输入 'Removed' 则表示已经手动移除过）: " container_name
-    container_name=${container_name:-"1Panel"}
+    read -p "请输入要移除的 1Panel 容器名（默认为 '1panel'，输入 'removed' 则表示已经手动移除过）: " container_name
+    container_name=${container_name:-"1panel"}
 
-    if [[ $container_name != "Removed" ]]; then
+    if [[ $container_name != "removed" ]]; then
         docker stop "$container_name" &>/dev/null
         docker rm "$container_name" &>/dev/null
         echo "容器 $container_name 已停止并移除。"
@@ -163,7 +163,7 @@ check_database_and_remove_container() {
 # 函数：返回用户根目录并删除临时文件
 cleanup_and_notify() {
     local user_home=$(eval echo ~$USER)
-    rm -rf ${1PANEL_DIR}
+    rm -rf ${PANEL_DIR}
     echo "1Panel 已经由 Docker 运行方式切换到宿主机直接运行"
 }
 
@@ -173,8 +173,8 @@ function main(){
     create_dir
     check_root
     download_1panel
-    install_1panel
     check_database_and_remove_container
+    install_1panel
     cleanup_and_notify
 }
 main
