@@ -118,6 +118,9 @@ install_1panel() {
     cp ${PANEL_DIR}/1panel /usr/local/bin && chmod +x /usr/local/bin/1panel
     cp ${PANEL_DIR}/1pctl /usr/local/bin && chmod +x /usr/local/bin/1pctl
     cp ${PANEL_DIR}/1panel.service /etc/systemd/system
+    if [[ ! -f /usr/bin/1panel ]]; then
+        ln -s /usr/local/bin/1panel /usr/bin/1panel >/dev/null 2>&1
+    fi
     if [[ ! -f /usr/bin/1pctl ]]; then
         ln -s /usr/local/bin/1pctl /usr/bin/1pctl >/dev/null 2>&1
     fi
