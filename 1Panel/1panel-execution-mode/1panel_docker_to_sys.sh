@@ -39,6 +39,7 @@ check_and_install_dependencies() {
 # 函数：创建目录
 create_dir() {
     1PANEL_DIR=~/1panel-install-dir
+    mkdir -p ${1PANEL_DIR}
     cd ${1PANEL_DIR}
 }
 
