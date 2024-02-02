@@ -8,6 +8,31 @@ check_root() {
     fi
 }
 
+# 函数：检查 1Panel 是否已经安装
+check_1panel_installed() {
+    if command -v 1panel &>/dev/null && command -v 1pctl &>/dev/null; then
+        echo "1Panel 已经安装在宿主机上，跳过安装步骤。"
+        exit 0
+    fi
+
+    echo "1Panel 尚未在宿主机上安装，继续检查数据库文件。"
+    
+    read -p "请输入 1Panel 数据所在的顶层目录路径（默认为 /opt）: " db_directory
+    db_directory=${db_directory:-"/opt"}
+    local db_file="$db_directory/1panel/db/1Panel.db"
+    
+    if [[ ! -f "$db_file" ]]; then
+        echo "1Panel 未安装过，不需要执行迁移"
+        exit 1
+    else
+        # 备份数据库文件
+        local backup_dir="/opt/1panel-bak/db"
+        mkdir -p "$backup_dir"
+        cp "$db_file" "$backup_dir/1Panel.db"
+        echo "已经备份旧数据库文件到 $backup_dir/1Panel.db"
+    fi
+}
+
 # 函数：检查并安装缺失的组件
 check_and_install_dependencies() {
     local dependencies=("curl" "tar" "awk" "ping" "bc" "docker")
@@ -135,26 +160,26 @@ install_1panel() {
     fi
 }
 
-# 函数：检查数据库文件并移除容器
-check_database_and_remove_container() {
-    local db_file="/opt/1panel/db/1Panel.db"
-    
-    if [[ ! -f "$db_file" ]]; then
-        echo "1Panel 未安装过"
-        exit 1
-    fi
+# 函数：移除容器
+remove_container() {
+    local container_exists=false
 
-    # 备份数据库文件
-    local backup_dir="/opt/1panel-bak/db"
-    mkdir -p "$backup_dir"
-    cp "$db_file" "$backup_dir/1Panel.db"
+    while [[ $container_exists == false ]]; do
+        # 列出已创建容器及其对应镜像
+        echo "已创建的 Docker 容器及其对应镜像："
+        docker ps -a --format "table {{.Names}}\t{{.Image}}"
 
-    # 列出已创建容器及其对应镜像
-    echo "已创建的 Docker 容器及其对应镜像："
-    docker ps -a --format "table {{.Names}}\t{{.Image}}"
+        read -p "请输入要移除的 1Panel 容器名（默认为 '1panel'，输入 'removed' 则表示已经手动移除过）: " container_name
+        container_name=${container_name:-"1panel"}
 
-    read -p "请输入要移除的 1Panel 容器名（默认为 '1panel'，输入 'removed' 则表示已经手动移除过）: " container_name
-    container_name=${container_name:-"1panel"}
+        if [[ $container_name != "removed" ]]; then
+            if docker inspect "$container_name" &>/dev/null; then
+                container_exists=true
+            else
+                echo "容器 $container_name 不存在。请重新输入。"
+            fi
+        fi
+    done
 
     if [[ $container_name != "removed" ]]; then
         docker stop "$container_name" &>/dev/null
@@ -162,6 +187,7 @@ check_database_and_remove_container() {
         echo "容器 $container_name 已停止并移除。"
     fi
 }
+
 
 # 函数：返回用户根目录并删除临时文件
 cleanup_and_notify() {
@@ -172,11 +198,12 @@ cleanup_and_notify() {
 
 # 调用函数
 function main(){
+    check_root
+    check_1panel_installed
     check_and_install_dependencies
     create_dir
-    check_root
     download_1panel
-    check_database_and_remove_container
+    remove_container
     install_1panel
     cleanup_and_notify
 }
