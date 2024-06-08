@@ -56,8 +56,12 @@ systemctl enable 1panel-auto-upgrade
 ```
 
 - 脚本链接替代
+  - https://testingcf.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+
+  - https://fastly.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+
+  - https://gcore.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+
   - https://cdn.jsdelivr.net/gh/okxlin/ToolScript@main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
 
-  - https://gh-proxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
-
-  - https://ghproxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
+  - https://mirror.ghproxy.com/https://github.com/okxlin/ToolScript/raw/main/1Panel/1panel-auto-upgrade/1panel-auto-upgrade.sh
