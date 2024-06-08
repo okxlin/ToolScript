@@ -124,12 +124,21 @@ install_docker_with_docker_shell() {
     if command -v docker &>/dev/null; then
         echo "Docker已经安装 (Docker is already installed)."
     else
-        sources=(
+        docker_sources=(
             "https://mirrors.aliyun.com/docker-ce"
             "https://mirrors.tencent.com/docker-ce"
             "https://mirrors.163.com/docker-ce"
             "https://mirrors.cernet.edu.cn/docker-ce"
             "https://download.docker.com"
+        )
+
+        docker_install_scripts=(
+            "https://get.docker.com"
+            "https://testingcf.jsdelivr.net/gh/docker/docker-install@master/install.sh"
+            "https://cdn.jsdelivr.net/gh/docker/docker-install@master/install.sh"
+            "https://fastly.jsdelivr.net/gh/docker/docker-install@master/install.sh"
+            "https://gcore.jsdelivr.net/gh/docker/docker-install@master/install.sh"
+            "https://raw.githubusercontent.com/docker/docker-install/master/install.sh"
         )
 
         get_average_delay() {
@@ -146,10 +155,10 @@ install_docker_with_docker_shell() {
             echo "$average_delay"
         }
 
-        min_delay=${#sources[@]}
+        min_delay=${#docker_sources[@]}
         selected_source=""
 
-        for source in "${sources[@]}"; do
+        for source in "${docker_sources[@]}"; do
             average_delay=$(get_average_delay "$source")
 
             if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
@@ -161,14 +170,21 @@ install_docker_with_docker_shell() {
         if [ -n "$selected_source" ]; then
             echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
             export DOWNLOAD_URL="$selected_source"
-            curl -fsSL "https://get.docker.com" -o get-docker.sh
-            sh get-docker.sh
-
-            if [ $? -eq 0 ]; then
-                echo "Docker安装成功 (Docker installed successfully)."
-            else
-                echo "Docker安装失败 (Failed to install Docker)."
-            fi
+            for script_source in "${docker_install_scripts[@]}"; do
+                curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 60 "$script_source" -o get-docker.sh
+                if [ $? -eq 0 ]; then
+                    echo "成功从 $script_source 下载安装脚本 (Successfully downloaded installation script from $script_source)."
+                    sh get-docker.sh
+                    if [ $? -eq 0 ]; then
+                        echo "Docker安装成功 (Docker installed successfully)."
+                        return
+                    else
+                        echo "Docker安装失败 (Failed to install Docker)."
+                    fi
+                else
+                    echo "从 $script_source 下载安装脚本失败，尝试下一个链接 (Failed to download installation script from $script_source, trying next link)."
+                fi
+            done
         else
             echo "无法选择源进行安装 (Unable to select a source for installation)."
         fi
@@ -178,34 +194,63 @@ install_docker_with_docker_shell() {
 
 # 从包管理器安装 Docker（针对 yum）
 install_docker_with_yum_package_manager() {
-    yum install -y yum-utils device-mapper-persistent-data lvm2
-    if [ $? -eq 0 ]; then
-        echo "必需组件安装成功 (Necessary components installed successfully)."
-        
-        # 测试官方源的延迟
-        official_source="download.docker.com"
-        official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
+    # 定义候选源列表
+    docker_sources=(
+        "https://mirrors.aliyun.com/docker-ce"
+        "https://mirrors.tencent.com/docker-ce"
+        "https://mirrors.163.com/docker-ce"
+        "https://mirrors.cernet.edu.cn/docker-ce"
+        "https://download.docker.com"
+    )
 
-        # 测试 mirrors.cernet.edu.cn/docker-ce 的延迟
-        mirror_source="mirrors.cernet.edu.cn/docker-ce"
-        mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
-        
-        echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
-        echo "镜像源延迟为: $mirror_delay 秒 (Mirror source latency: $mirror_delay seconds)"
-        
-        # 比较延迟并选择延迟较低的源
-        if (( $(echo "$official_delay < $mirror_delay" | bc -l) )); then
-            echo "官方源延迟更低，选择官方源。(Official source has lower latency, selecting official source.)"
-            chosen_source=$official_source
-        else
-            echo "镜像源延迟更低，选择镜像源。(Mirror source has lower latency, selecting mirror source.)"
-            chosen_source=$mirror_source
+    # 定义待安装组件列表
+    docker_components=(
+        "docker-ce"
+        "docker-ce-cli"
+        "containerd.io"
+        "docker-compose-plugin"
+        "docker-ce-rootless-extras"
+        "docker-buildx-plugin"
+    )
+
+    # 定义函数：获取平均延迟
+    get_average_delay() {
+        local source=$1
+        local total_delay=0
+        local iterations=3
+
+        for ((i = 0; i < iterations; i++)); do
+            delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+            total_delay=$(awk "BEGIN {print $total_delay + $delay}")
+        done
+
+        average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
+        echo "$average_delay"
+    }
+
+    # 初始化最小延迟为一个大数
+    min_delay=99999999
+    selected_source=""
+
+    # 遍历所有源，选择延迟最低的源
+    for source in "${docker_sources[@]}"; do
+        average_delay=$(get_average_delay "$source")
+
+        if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
+            min_delay=$average_delay
+            selected_source=$source
         fi
+    done
+
+    # 如果成功选择了源
+    if [ -n "$selected_source" ]; then
+        echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
         
-        yum-config-manager --add-repo https://$chosen_source/linux/centos/docker-ce.repo
+        # 添加源并安装Docker组件
+        yum-config-manager --add-repo "$selected_source/linux/centos/docker-ce.repo"
         if [ $? -eq 0 ]; then
             echo "Docker源添加成功 (Docker repository added successfully)."
-            yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin
+            yum install -y "${docker_components[@]}"
             if [ $? -eq 0 ]; then
                 echo "Docker安装成功 (Docker installed successfully)."
                 
@@ -233,14 +278,17 @@ install_docker_with_yum_package_manager() {
             echo "无法添加Docker源 (Failed to add Docker repository)."
         fi
     else
-        echo "必需组件安装失败 (Failed to install necessary components)."
+        echo "无法选择源进行安装 (Unable to select a source for installation)."
     fi
 }
 
 
 # 从包管理器安装 Docker（针对 apt）
 install_docker_with_apt_package_manager() {
+    # 更新apt源
     apt-get update
+
+    # 安装必要的组件
     apt-get install -y \
         apt-transport-https \
         ca-certificates \
@@ -251,55 +299,81 @@ install_docker_with_apt_package_manager() {
     if [ $? -eq 0 ]; then
         echo "必需组件安装成功 (Necessary components installed successfully)."
 
-        # 测试官方源的延迟
-        official_source="download.docker.com"
-        official_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$official_source)
+        # 定义候选源列表
+        docker_sources=(
+            "https://mirrors.aliyun.com/docker-ce"
+            "https://mirrors.tencent.com/docker-ce"
+            "https://mirrors.163.com/docker-ce"
+            "https://mirrors.cernet.edu.cn/docker-ce"
+            "https://download.docker.com"
+        )
 
-        # 测试 mirrors.cernet.edu.cn/docker-ce 的延迟
-        mirror_source="mirrors.cernet.edu.cn/docker-ce"
-        mirror_delay=$(curl -o /dev/null -s -w "%{time_total}\n" https://$mirror_source)
-        
-        echo "官方源延迟为: $official_delay 秒 (Official source latency: $official_delay seconds)"
-        echo "镜像源延迟为: $mirror_delay 秒 (Mirror source latency: $mirror_delay seconds)"
-        
-        # 比较延迟并选择延迟较低的源
-        if (( $(echo "$official_delay < $mirror_delay" | bc -l) )); then
-            echo "官方源延迟更低，选择官方源。(Official source has lower latency, selecting official source.)"
-            chosen_source=$official_source
-        else
-            echo "镜像源延迟更低，选择镜像源。(Mirror source has lower latency, selecting mirror source.)"
-            chosen_source=$mirror_source
-        fi
+        # 定义函数：获取平均延迟
+        get_average_delay() {
+            local source=$1
+            local total_delay=0
+            local iterations=3
 
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            for ((i = 0; i < iterations; i++)); do
+                delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+                total_delay=$(awk "BEGIN {print $total_delay + $delay}")
+            done
 
-        echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://$chosen_source/linux/ubuntu \
-            $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+            average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
+            echo "$average_delay"
+        }
 
-        apt-get update
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin
+        # 初始化最小延迟为一个大数
+        min_delay=99999999
+        selected_source=""
 
-        if [ $? -eq 0 ]; then
-            echo "Docker安装成功 (Docker installed successfully)."
+        # 遍历所有源，选择延迟最低的源
+        for source in "${docker_sources[@]}"; do
+            average_delay=$(get_average_delay "$source")
 
-            systemctl start docker
+            if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
+                min_delay=$average_delay
+                selected_source=$source
+            fi
+        done
+
+        # 如果成功选择了源
+        if [ -n "$selected_source" ]; then
+            echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
+
+            # 添加源并安装Docker组件
+            curl -fsSL https://$selected_source/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+            echo \
+                "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://$selected_source/linux/ubuntu \
+                $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+            apt-get update
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin
 
             if [ $? -eq 0 ]; then
-                echo "Docker服务已启动 (Docker service started)."
+                echo "Docker安装成功 (Docker installed successfully)."
 
-                systemctl enable docker
+                systemctl start docker
 
                 if [ $? -eq 0 ]; then
-                    echo "Docker已设置为开机自启 (Docker set to start on boot)."
+                    echo "Docker服务已启动 (Docker service started)."
+
+                    systemctl enable docker
+
+                    if [ $? -eq 0 ]; then
+                        echo "Docker已设置为开机自启 (Docker set to start on boot)."
+                    else
+                        echo "无法设置Docker为开机自启 (Failed to set Docker to start on boot)."
+                    fi
                 else
-                    echo "无法设置Docker为开机自启 (Failed to set Docker to start on boot)."
+                    echo "无法启动Docker服务 (Failed to start Docker service)."
                 fi
             else
-                echo "无法启动Docker服务 (Failed to start Docker service)."
+                echo "Docker安装失败 (Failed to install Docker)."
             fi
         else
-            echo "Docker安装失败 (Failed to install Docker)."
+            echo "无法选择源进行安装 (Unable to select a source for installation)."
         fi
     else
         echo "必需组件安装失败 (Failed to install necessary components)."
@@ -314,34 +388,60 @@ install_docker_compose() {
     else
         latest_compose=$(curl -sL "https://api.github.com/repos/docker/compose/releases/latest" | grep -oP '"tag_name": "\K(.*)(?=")')
         download_url="https://github.com/docker/compose/releases/download/$latest_compose/docker-compose-$(uname -s)-$(uname -m)"
-        
-        # 使用timeout设置下载超时时间为5秒
-        if timeout 5 bash -c "curl -fsSL $download_url > /dev/null"; then
-            wget $download_url -O /usr/local/bin/docker-compose
+        proxy_sources=(
+            "https://mirror.ghproxy.com"
+            "https://ghproxy.net"
+            "https://ghproxy.cc"
+        )
+
+        # 使用timeout设置下载超时时间为20秒
+        if timeout 20 bash -c "curl -fsSL $download_url > /usr/local/bin/docker-compose"; then
             chmod +x /usr/local/bin/docker-compose
 
-            # 检查软链接是否存在
-            if [ ! -e /usr/bin/docker-compose ]; then
-                # 创建软链接
-                ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
-                echo "Docker-compose已安装 (Docker-compose installed)."
+            # 检查docker-compose是否可执行
+            if docker-compose --version &>/dev/null; then
+                # 检查软链接是否存在
+                if [ ! -e /usr/bin/docker-compose ]; then
+                    # 创建软链接
+                    ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+                    echo "Docker-compose已安装 (Docker-compose installed)."
+                else
+                    echo "软链接已存在。跳过创建 (Soft link already exists. Skipping creation)."
+                fi
             else
-                echo "软链接已存在。跳过创建 (Soft link already exists. Skipping creation)."
+                echo "安装的docker-compose不可执行，请检查下载源。(Installed docker-compose is not executable, please check the download source.)"
             fi
         else
             echo "下载docker-compose超时，使用代理重新下载... (Download timed out, retrying with proxy...)"
-            download_url="https://mirror.ghproxy.com/$download_url"
-            wget --no-check-certificate -O /usr/local/bin/docker-compose $download_url
-            chmod +x /usr/local/bin/docker-compose
 
-            # 检查软链接是否存在
-            if [ ! -e /usr/bin/docker-compose ]; then
-                # 创建软链接
-                ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
-                echo "Docker-compose已安装 (Docker-compose installed)."
-            else
-                echo "软链接已存在。跳过创建 (Soft link already exists. Skipping creation)."
-            fi
+            # 尝试从多个代理源下载
+            for proxy in "${proxy_sources[@]}"; do
+                proxy_download_url="${proxy}${download_url#https://}"
+                if timeout 20 bash -c "wget --no-check-certificate -O /usr/local/bin/docker-compose $proxy_download_url"; then
+                    chmod +x /usr/local/bin/docker-compose
+
+                    # 检查docker-compose是否可执行
+                    if docker-compose --version &>/dev/null; then
+                        # 检查软链接是否存在
+                        if [ ! -e /usr/bin/docker-compose ]; then
+                            # 创建软链接
+                            ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+                            echo "Docker-compose已通过代理安装 (Docker-compose installed via proxy)."
+                        else
+                            echo "软链接已存在。跳过创建 (Soft link already exists. Skipping creation)."
+                        fi
+                        return
+                    else
+                        echo "安装的docker-compose不可执行，请检查下载源。(Installed docker-compose is not executable, please check the download source.)"
+                    fi
+                else
+                    echo "从 $proxy 下载docker-compose失败，尝试下一个源 (Failed to download docker-compose from $proxy, trying next source)."
+                fi
+            done
+
+            # 删除下载失败的文件和软链接
+            rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose
+            echo "所有代理源均无法下载docker-compose (Failed to download docker-compose from all proxy sources)."
         fi
     fi
 }
@@ -389,6 +489,107 @@ check_components() {
     fi
 }
 
+# 设置swap
+setup_swap() {
+    # 检查是否已经存在swap
+    if swapon --show | grep -q '^/'; then
+        echo "Swap已存在。当前的swap大小为： (Swap already exists. Current swap size is:)"
+        swapon --show
+    else
+        # 获取系统内存大小 (单位为KB)
+        mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        mem_total_mb=$((mem_total_kb / 1024))
+        mem_total_gb=$((mem_total_mb / 1024))
+
+        # 获取根目录可用磁盘空间 (单位为KB)
+        available_disk_space_kb=$(df / | tail -1 | awk '{print $4}')
+        available_disk_space_mb=$((available_disk_space_kb / 1024))
+        available_disk_space_gb=$((available_disk_space_mb / 1024))
+
+        # 如果可用磁盘空间小于3GB，则设置swap为512MB
+        if [ $available_disk_space_gb -lt 3 ]; then
+            swap_size_mb=512
+        else
+            # 根据系统内存大小推荐swap大小
+            if [ $mem_total_gb -le 2 ]; then
+                recommended_swap_size_mb=$((mem_total_mb * 2))
+            elif [ $mem_total_gb -le 8 ]; then
+                recommended_swap_size_mb=$((mem_total_mb))
+            elif [ $mem_total_gb -le 64 ]; then
+                recommended_swap_size_mb=4096
+            else
+                recommended_swap_size_mb=4096
+            fi
+
+            # 确保swap大小不超过可用磁盘空间的一半和8GB
+            max_swap_size_mb=$((available_disk_space_mb / 2))
+            if [ $max_swap_size_mb -gt $((8 * 1024)) ]; then
+                max_swap_size_mb=$((8 * 1024))
+            fi
+
+            if [ $recommended_swap_size_mb -gt $max_swap_size_mb ]; then
+                swap_size_mb=$max_swap_size_mb
+            else
+                swap_size_mb=$recommended_swap_size_mb
+            fi
+        fi
+
+        # 创建swap文件
+        swap_file="/swapfile"
+        echo "未检测到swap。创建一个swap文件，大小为 $(($swap_size_mb / 1024))GB... (No swap detected. Creating a swap file with size $(($swap_size_mb / 1024))GB...)"
+        dd if=/dev/zero of=$swap_file bs=1M count=$swap_size_mb
+
+        # 设置swap文件
+        chmod 600 $swap_file
+        mkswap $swap_file
+        swapon $swap_file
+
+        # 添加到fstab以便重启后自动启用swap
+        echo "$swap_file none swap sw 0 0" >> /etc/fstab
+
+        echo "Swap创建成功。当前的swap大小为： (Swap created successfully. Current swap size is:)"
+        swapon --show
+    fi
+}
+
+
+# 提示用户批量安装所需组件
+prompt_install_components() {
+    echo "即将安装组件以增强系统功能：(The following components will be installed to enhance system functionality:)"
+    echo "  - cloud-init: 初始化云实例。(Cloud instance initialization.)"
+    echo "  - qemu-guest-agent: 宿主机通信。(Host communication.)"
+    echo "  - cloud-utils: 磁盘管理工具。(Disk management tools.)"
+
+    # 检查组件是否已安装
+    if dpkg -l cloud-init qemu-guest-agent cloud-utils cloud-initramfs-growroot &>/dev/null || rpm -q cloud-init qemu-guest-agent cloud-utils cloud-utils-growpart &>/dev/null; then
+        echo "组件已安装，跳过安装过程。(Components are already installed, skipping installation process.)"
+        return
+    fi
+
+    if grep -q -i "ubuntu\|debian" /etc/*release; then
+        echo "  - cloud-initramfs-growroot: 调整文件系统大小。(Filesystem resizing.)"
+        echo ""
+        read -p "确认安装？(Confirm installation?) (y/n): " confirm
+        if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+            apt-get update
+            apt-get install -y cloud-init qemu-guest-agent cloud-initramfs-growroot cloud-utils
+        else
+            echo "组件安装已取消。(Component installation canceled.)"
+        fi
+    elif grep -q -i "centos\|rhel" /etc/*release; then
+        echo "  - cloud-utils-growpart: 调整分区大小。(Partition resizing.)"
+        echo ""
+        read -p "确认安装？(Confirm installation?) (y/n): " confirm
+        if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+            yum install -y cloud-init qemu-guest-agent cloud-utils-growpart cloud-utils
+        else
+            echo "组件安装已取消。(Component installation canceled.)"
+        fi
+    else
+        echo "操作系统不支持，需手动安装。(Unsupported OS, manual installation required.)"
+    fi
+}
+
 
 # 执行函数
 check_root
@@ -399,8 +600,8 @@ enable_bbr
 adjust_hostname
 install_docker
 install_docker_compose
-
-# 检查组件和设置是否正确
+prompt_install_components
+setup_swap
 check_components
 
 echo "设置完成 (Setup complete)."
