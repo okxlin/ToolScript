@@ -114,6 +114,7 @@ install_docker() {
         else
             echo "无法找到适合的包管理器来安装 Docker (Unable to find suitable package manager to install Docker)."
             echo "请手动安装 Docker 或者尝试其他安装方式 (Please install Docker manually or try another installation method)."
+            echo "bash <(curl -sSL https://linuxmirrors.cn/docker.sh)"
         fi
     fi
 }
@@ -171,7 +172,8 @@ install_docker_with_docker_shell() {
             echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
             export DOWNLOAD_URL="$selected_source"
             for script_source in "${docker_install_scripts[@]}"; do
-                curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 60 "$script_source" -o get-docker.sh
+                echo "正在尝试从 $script_source 下载安装脚本 (Attempting to download installation script from $script_source)..."
+                curl -# -fsSL --retry 2 --retry-delay 3 --connect-timeout 5 --max-time 15 "$script_source" -o get-docker.sh
                 if [ $? -eq 0 ]; then
                     echo "成功从 $script_source 下载安装脚本 (Successfully downloaded installation script from $script_source)."
                     sh get-docker.sh
