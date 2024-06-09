@@ -173,7 +173,7 @@ install_docker_with_docker_shell() {
             export DOWNLOAD_URL="$selected_source"
             for script_source in "${docker_install_scripts[@]}"; do
                 echo "正在尝试从 $script_source 下载安装脚本 (Attempting to download installation script from $script_source)..."
-                curl -# -fsSL --retry 2 --retry-delay 3 --connect-timeout 5 --max-time 15 "$script_source" -o get-docker.sh
+                curl -# -fsSL --retry 2 --retry-delay 3 --connect-timeout 5 --max-time 10 "$script_source" -o get-docker.sh
                 if [ $? -eq 0 ]; then
                     echo "成功从 $script_source 下载安装脚本 (Successfully downloaded installation script from $script_source)."
                     sh get-docker.sh
@@ -508,12 +508,14 @@ setup_swap() {
         available_disk_space_mb=$((available_disk_space_kb / 1024))
         available_disk_space_gb=$((available_disk_space_mb / 1024))
 
-        # 如果可用磁盘空间小于3GB，则设置swap为512MB
-        if [ $available_disk_space_gb -lt 3 ]; then
+        # 如果可用磁盘空间小于5GB，则设置swap为512MB
+        if [ $available_disk_space_gb -lt 5 ]; then
             swap_size_mb=512
         else
             # 根据系统内存大小推荐swap大小
-            if [ $mem_total_gb -le 2 ]; then
+            if [ $mem_total_gb -le 1 ]; then
+                recommended_swap_size_mb=$((1024))
+            elif [ $mem_total_gb -le 2 ]; then
                 recommended_swap_size_mb=$((mem_total_mb * 2))
             elif [ $mem_total_gb -le 8 ]; then
                 recommended_swap_size_mb=$((mem_total_mb))
