@@ -145,10 +145,14 @@ install_docker_with_docker_shell() {
         get_average_delay() {
             local source=$1
             local total_delay=0
-            local iterations=3
+            local iterations=2
+            local timeout=2
 
             for ((i = 0; i < iterations; i++)); do
-                delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+                delay=$(curl -o /dev/null -s -m $timeout -w "%{time_total}\n" "$source")
+                if [ $? -ne 0 ]; then
+                    delay=$timeout
+                fi
                 total_delay=$(awk "BEGIN {print $total_delay + $delay}")
             done
 
@@ -156,17 +160,18 @@ install_docker_with_docker_shell() {
             echo "$average_delay"
         }
 
-        min_delay=${#docker_sources[@]}
+        min_delay=99999999
         selected_source=""
 
         for source in "${docker_sources[@]}"; do
-            average_delay=$(get_average_delay "$source")
+            average_delay=$(get_average_delay "$source" &)
 
             if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
                 min_delay=$average_delay
                 selected_source=$source
             fi
         done
+        wait
 
         if [ -n "$selected_source" ]; then
             echo "选择延迟最低的源 $selected_source，延迟为 $min_delay 秒 (Selecting source with minimum delay of $min_delay seconds)."
@@ -219,30 +224,35 @@ install_docker_with_yum_package_manager() {
     get_average_delay() {
         local source=$1
         local total_delay=0
-        local iterations=3
-
+        local iterations=2
+        local timeout=2
+        
         for ((i = 0; i < iterations; i++)); do
-            delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
+            delay=$(curl -o /dev/null -s -m $timeout -w "%{time_total}\n" "$source")
+            if [ $? -ne 0 ]; then
+                delay=$timeout
+            fi
             total_delay=$(awk "BEGIN {print $total_delay + $delay}")
         done
-
+    
         average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
         echo "$average_delay"
     }
-
+    
     # 初始化最小延迟为一个大数
     min_delay=99999999
     selected_source=""
-
-    # 遍历所有源，选择延迟最低的源
+    
+    # 并行测试所有源的延迟
     for source in "${docker_sources[@]}"; do
-        average_delay=$(get_average_delay "$source")
-
+        average_delay=$(get_average_delay "$source" &)
+    
         if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
             min_delay=$average_delay
             selected_source=$source
         fi
     done
+    wait
 
     # 如果成功选择了源
     if [ -n "$selected_source" ]; then
@@ -310,34 +320,39 @@ install_docker_with_apt_package_manager() {
             "https://download.docker.com"
         )
 
-        # 定义函数：获取平均延迟
-        get_average_delay() {
-            local source=$1
-            local total_delay=0
-            local iterations=3
-
-            for ((i = 0; i < iterations; i++)); do
-                delay=$(curl -o /dev/null -s -w "%{time_total}\n" "$source")
-                total_delay=$(awk "BEGIN {print $total_delay + $delay}")
-            done
-
-            average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
-            echo "$average_delay"
-        }
-
-        # 初始化最小延迟为一个大数
-        min_delay=99999999
-        selected_source=""
-
-        # 遍历所有源，选择延迟最低的源
-        for source in "${docker_sources[@]}"; do
-            average_delay=$(get_average_delay "$source")
-
-            if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
-                min_delay=$average_delay
-                selected_source=$source
+    # 定义函数：获取平均延迟
+    get_average_delay() {
+        local source=$1
+        local total_delay=0
+        local iterations=2
+        local timeout=2
+        
+        for ((i = 0; i < iterations; i++)); do
+            delay=$(curl -o /dev/null -s -m $timeout -w "%{time_total}\n" "$source")
+            if [ $? -ne 0 ]; then
+                delay=$timeout
             fi
+            total_delay=$(awk "BEGIN {print $total_delay + $delay}")
         done
+    
+        average_delay=$(awk "BEGIN {print $total_delay / $iterations}")
+        echo "$average_delay"
+    }
+    
+    # 初始化最小延迟为一个大数
+    min_delay=99999999
+    selected_source=""
+    
+    # 并行测试所有源的延迟
+    for source in "${docker_sources[@]}"; do
+        average_delay=$(get_average_delay "$source" &)
+    
+        if (( $(awk 'BEGIN { print '"$average_delay"' < '"$min_delay"' }') )); then
+            min_delay=$average_delay
+            selected_source=$source
+        fi
+    done
+    wait
 
         # 如果成功选择了源
         if [ -n "$selected_source" ]; then
@@ -418,8 +433,8 @@ install_docker_compose() {
 
             # 尝试从多个代理源下载
             for proxy in "${proxy_sources[@]}"; do
-                proxy_download_url="${proxy}${download_url#https://}"
-                if timeout 30 bash -c "wget --no-check-certificate -O /usr/local/bin/docker-compose $proxy_download_url"; then
+                proxy_download_url="${proxy}/${download_url#https://}"
+                if timeout 30 bash -c "wget --quiet --no-check-certificate -O /usr/local/bin/docker-compose $proxy_download_url"; then
                     chmod +x /usr/local/bin/docker-compose
 
                     # 检查docker-compose是否可执行
@@ -442,7 +457,7 @@ install_docker_compose() {
             done
 
             # 删除下载失败的文件和软链接
-            rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose
+            \rm -rf -f /usr/local/bin/docker-compose /usr/bin/docker-compose
             echo "所有代理源均无法下载docker-compose (Failed to download docker-compose from all proxy sources)."
             echo "可以尝试执行以下命令手动下载并安装 docker-compose (Try running this command to install docker-compose manually):"
 
