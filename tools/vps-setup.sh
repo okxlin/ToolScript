@@ -10,8 +10,8 @@ check_root() {
 
 # 同步系统时间
 sync_system_time() {
-    # 输出提示消息：时间同步前 (Synchronizing system time...)
-    echo "开始执行时间同步操作... (Starting time synchronization...)"
+    # 输出提示消息：时间同步
+    echo "同步系统时间... (Syncing system time...)"
 
     # 检查是否安装了curl，如果没有，使用包管理器安装它
     if ! command -v curl &>/dev/null; then
@@ -48,6 +48,7 @@ sync_system_time() {
 
 # 内核启动bbr设置
 enable_bbr() {
+    echo "启用BBR拥塞控制算法... (Enabling BBR congestion control...)"
     kernel_version=$(uname -r | cut -d. -f1)
     if [ "$kernel_version" -gt 4 ] || ([ "$kernel_version" -eq 4 ] && [ "$(uname -r | cut -d. -f2)" -ge 9 ]); then
         echo "启用 BBR... (Enabling BBR...)"
@@ -65,12 +66,14 @@ EOF
 
 # 调整时区到上海
 adjust_timezone() {
+    echo "调整时区... (Adjusting timezone...)"
     timedatectl set-timezone Asia/Shanghai
     echo "时区已设置为Asia/Shanghai (Timezone set to Asia/Shanghai)."
 }
 
 # 调整主机名
 adjust_hostname() {
+    echo "调整主机名... (Adjusting hostname...)"
     if command -v lsb_release &>/dev/null; then
         os_name=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
     elif [ -f /etc/os-release ]; then
@@ -101,6 +104,7 @@ adjust_hostname() {
 
 # 安装 Docker
 install_docker() {
+    echo "正在安装 Docker... (Installing Docker...)"
     install_docker_with_docker_shell
     if ! command -v docker &>/dev/null; then
         echo "尝试使用官方脚本安装失败，尝试使用包管理器安装 Docker (Failed to install using official script, trying package manager)..."
@@ -113,7 +117,7 @@ install_docker() {
             install_docker_with_apt_package_manager
         else
             echo "无法找到适合的包管理器来安装 Docker (Unable to find suitable package manager to install Docker)."
-            echo "请手动安装 Docker 或者尝试其他安装方式 (Please install Docker manually or try another installation method)."
+            echo "请运行以下命令手动安装 Docker 或者尝试其他安装方式 (Please run the following command to install Docker manually or try another installation method)."
             echo "bash <(curl -sSL https://linuxmirrors.cn/docker.sh)"
         fi
     fi
@@ -187,6 +191,8 @@ install_docker_with_docker_shell() {
                         return
                     else
                         echo "Docker安装失败 (Failed to install Docker)."
+                        echo "请运行以下命令手动安装 Docker 或者尝试其他安装方式 (Please run the following command to install Docker manually or try another installation method)."
+                        echo "bash <(curl -sSL https://linuxmirrors.cn/docker.sh)"
                     fi
                 else
                     echo "从 $script_source 下载安装脚本失败，尝试下一个链接 (Failed to download installation script from $script_source, trying next link)."
@@ -285,6 +291,8 @@ install_docker_with_yum_package_manager() {
                 fi
             else
                 echo "Docker安装失败 (Failed to install Docker)."
+                echo "请运行以下命令手动安装 Docker 或者尝试其他安装方式 (Please run the following command to install Docker manually or try another installation method)."
+                echo "bash <(curl -sSL https://linuxmirrors.cn/docker.sh)"
             fi
         else
             echo "无法添加Docker源 (Failed to add Docker repository)."
@@ -400,6 +408,7 @@ install_docker_with_apt_package_manager() {
 
 # 安装docker-compose
 install_docker_compose() {
+    echo "正在安装 Docker Compose... (Installing Docker Compose...)"
     if command -v docker-compose &>/dev/null; then
         echo "Docker-compose已经安装 (Docker-compose already installed)."
     else
@@ -473,6 +482,7 @@ install_docker_compose() {
 
 # 安装常用软件
 install_utilities() {
+    echo "安装常用工具... (Installing common utilities...)"
     if command -v yum &>/dev/null; then
         yum install -y curl wget mtr screen net-tools zip unzip tar lsof
     elif command -v apt-get &>/dev/null; then
@@ -488,6 +498,7 @@ install_utilities() {
 
 # 检测组件和设置是否正确
 check_components() {
+    echo "检查系统组件... (Checking system components...)"
     # 定义要检查的软件列表
     components=("docker" "docker-compose" "curl" "wget" "mtr" "screen" "zip" "unzip" "tar" "lsof")
 
@@ -515,6 +526,7 @@ check_components() {
 
 # 设置swap
 setup_swap() {
+    echo "设置交换空间... (Setting up swap space...)"
     # 检查是否已经存在swap
     if swapon --show | grep -q '^/'; then
         echo "Swap已存在。当前的swap大小为： (Swap already exists. Current swap size is:)"
@@ -617,18 +629,51 @@ prompt_install_components() {
 }
 
 
-# 执行函数
-check_root
-install_utilities
-adjust_timezone
-sync_system_time
-enable_bbr
-adjust_hostname
-install_docker
-install_docker_compose
-prompt_install_components
-setup_swap
-check_components
+# 主脚本逻辑
+main() {
+    check_root
 
-echo "设置完成 (Setup complete)."
-bash -l
+    while true; do
+        echo "请选择要执行的操作: (Please choose the operation to execute:)"
+        echo "1) 执行完整功能 (Execute full setup)"
+        echo "2) 只安装 Docker 和 Docker Compose (Install only Docker and Docker Compose)"
+        echo "3) 退出 (Exit)"
+        read -p "请输入选项 (1, 2 or 3): " choice
+
+        case $choice in
+            1)
+                # 执行完整功能
+                install_utilities
+                adjust_timezone
+                sync_system_time
+                enable_bbr
+                adjust_hostname
+                install_docker
+                install_docker_compose
+                setup_swap
+                check_components
+                echo "设置完成 (Setup complete)."
+                bash -l
+                break
+                ;;
+            2)
+                # 只安装 Docker 和 Docker Compose
+                install_docker
+                install_docker_compose
+                echo "设置完成 (Setup complete)."
+                break
+                ;;
+            3)
+                # 退出
+                echo "退出 (Exit)."
+                exit 0
+                ;;
+            *)
+                echo "无效的选项，请输入 1, 2 或 3 (Invalid option, please enter 1, 2 or 3)"
+                ;;
+        esac
+    done
+}
+
+# 执行主脚本逻辑
+main
