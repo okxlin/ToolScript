@@ -59,7 +59,7 @@ EOF
         echo "BBR 已启用 (BBR enabled)."
     else
         echo "内核版本低于 4.9。请使用脚本启用 BBR... (Kernel version is less than 4.9. Enabling BBR using script...)"
-        wget --no-check-certificate -O /opt/bbr.sh https://testingcf.jsdelivr.net/gh/teddysun/across@master/bbr.sh && chmod 755 /opt/bbr.sh && /opt/bbr.sh
+        echo "wget --no-check-certificate -O /opt/bbr.sh https://testingcf.jsdelivr.net/gh/teddysun/across@master/bbr.sh && chmod 755 /opt/bbr.sh && /opt/bbr.sh"
     fi
 }
 
