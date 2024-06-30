@@ -134,12 +134,12 @@ install_docker_with_docker_shell() {
         )
 
         docker_install_scripts=(
-            "https://get.docker.com"
             "https://testingcf.jsdelivr.net/gh/docker/docker-install@master/install.sh"
             "https://cdn.jsdelivr.net/gh/docker/docker-install@master/install.sh"
             "https://fastly.jsdelivr.net/gh/docker/docker-install@master/install.sh"
             "https://gcore.jsdelivr.net/gh/docker/docker-install@master/install.sh"
             "https://raw.githubusercontent.com/docker/docker-install/master/install.sh"
+            "https://get.docker.com"
         )
 
         get_average_delay() {
@@ -396,8 +396,8 @@ install_docker_compose() {
             "https://ghproxy.cc"
         )
 
-        # 使用timeout设置下载超时时间为20秒
-        if timeout 20 bash -c "curl -fsSL $download_url > /usr/local/bin/docker-compose"; then
+        # 使用timeout设置下载超时时间为30秒
+        if timeout 30 bash -c "curl -fsSL $download_url > /usr/local/bin/docker-compose"; then
             chmod +x /usr/local/bin/docker-compose
 
             # 检查docker-compose是否可执行
@@ -419,7 +419,7 @@ install_docker_compose() {
             # 尝试从多个代理源下载
             for proxy in "${proxy_sources[@]}"; do
                 proxy_download_url="${proxy}${download_url#https://}"
-                if timeout 20 bash -c "wget --no-check-certificate -O /usr/local/bin/docker-compose $proxy_download_url"; then
+                if timeout 30 bash -c "wget --no-check-certificate -O /usr/local/bin/docker-compose $proxy_download_url"; then
                     chmod +x /usr/local/bin/docker-compose
 
                     # 检查docker-compose是否可执行
@@ -444,6 +444,13 @@ install_docker_compose() {
             # 删除下载失败的文件和软链接
             rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose
             echo "所有代理源均无法下载docker-compose (Failed to download docker-compose from all proxy sources)."
+            echo "可以尝试执行以下命令手动下载并安装 docker-compose (Try running this command to install docker-compose manually):"
+
+            arch=$(uname -m)
+            if [ "$arch" == 'armv7l' ]; then
+                arch='armv7'
+            fi
+            echo "curl -L https://resource.fit2cloud.com/docker/compose/releases/download/v2.26.1/docker-compose-$(uname -s | tr A-Z a-z)-$arch -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose && ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose"
         fi
     fi
 }
