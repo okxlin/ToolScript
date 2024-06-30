@@ -396,6 +396,8 @@ install_docker_with_apt_package_manager() {
                 fi
             else
                 echo "Docker安装失败 (Failed to install Docker)."
+                echo "请运行以下命令手动安装 Docker 或者尝试其他安装方式 (Please run the following command to install Docker manually or try another installation method)."
+                echo "bash <(curl -sSL https://linuxmirrors.cn/docker.sh)"
             fi
         else
             echo "无法选择源进行安装 (Unable to select a source for installation)."
