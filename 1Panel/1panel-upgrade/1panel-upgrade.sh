@@ -22,12 +22,12 @@ confirm_upgrade() {
 check_package_manager() {
   if command -v apt >/dev/null 2>&1; then
     # 使用 apt 包管理器（Debian、Ubuntu等）
-    apt_packages=("sqlite3" "sed" "curl" "tar" "grep")
+    packages=("sqlite3" "sed" "curl" "tar" "grep")
     update_command="apt update"
     install_command="apt install -y"
   elif command -v yum >/dev/null 2>&1; then
     # 使用 yum 包管理器（CentOS、Rocky Linux等）
-    yum_packages=("sqlite" "sed" "curl" "tar" "grep")
+    packages=("sqlite" "sed" "curl" "tar" "grep")
     update_command="yum update"
     install_command="yum install -y"
   else
@@ -44,24 +44,40 @@ check_1panel_existence() {
   fi
 }
 
+# 获取当前1Panel版本和模式
+get_current_version_and_mode() {
+  if [[ -f /usr/local/bin/1panel ]]; then
+    CURRENT_VERSION=$(1panel version | grep -oP 'version:\s*\K.*')
+    CURRENT_MODE=$(1panel version | grep -oP 'mode:\s*\K.*')
+  else
+    echo "无法获取当前1Panel版本和模式"
+    exit 1
+  fi
+}
+
+# 获取最新的1Panel版本
+get_latest_version() {
+  PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/latest)
+}
+
+# 比较版本
+compare_versions() {
+  if [[ $CURRENT_VERSION == $PANELVER ]]; then
+    echo "当前版本 $CURRENT_VERSION 已是最新版本 $PANELVER"
+    exit 0
+  fi
+}
+
 # 更新包管理器并安装软件包
 update_and_install_packages() {
   $update_command
-  if [[ ${#apt_packages[@]} -gt 0 ]]; then
-    $install_command "${apt_packages[@]}"
-  fi
-
-  if [[ ${#yum_packages[@]} -gt 0 ]]; then
-    $install_command "${yum_packages[@]}"
-  fi
+  $install_command "${packages[@]}"
 }
 
 # 下载 1Panel
 download_1panel() {
   mkdir -p ~/1pupdate-tmp
   cd ~/1pupdate-tmp
-  PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/stable/latest)
-  INSTALL_MODE="stable"
   osCheck=$(uname -a)
   if [[ $osCheck =~ 'x86_64' ]]; then
     ARCH="amd64"
@@ -78,7 +94,7 @@ download_1panel() {
     exit 1
   fi
   package_file_name="1panel-${PANELVER}-linux-${ARCH}.tar.gz"
-  package_download_url="https://resource.fit2cloud.com/1panel/package/${INSTALL_MODE}/${PANELVER}/release/${package_file_name}"
+  package_download_url="https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/${PANELVER}/release/${package_file_name}"
   echo "正在尝试下载 ${package_download_url}"
   curl -sSL -o ${package_file_name} "$package_download_url" || {
     echo "下载失败，切换到备选链接"
@@ -148,6 +164,9 @@ main() {
   if [[ $confirm_result -eq 0 ]]; then
     check_package_manager
     check_1panel_existence
+    get_current_version_and_mode
+    get_latest_version
+    compare_versions
     update_and_install_packages
     download_1panel
     update_1pctl_basedir
