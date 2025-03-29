@@ -18,6 +18,49 @@ confirm_upgrade() {
   fi
 }
 
+# 询问用户选择版本
+select_version_type() {
+  read -p "请选择1Panel版本（输入 '1' 为国际版，输入 '2' 为国内版）: " version_choice
+  if [[ $version_choice == "1" ]]; then
+    # 选择国际版
+    VERSION_TYPE="international"
+    version_url="https://resource.1panel.hk/stable/latest"
+    package_url_prefix="https://resource.1panel.hk"
+  elif [[ $version_choice == "2" ]]; then
+    # 选择国内版
+    VERSION_TYPE="domestic"
+    version_url="https://resource.fit2cloud.com/1panel/package/stable/latest"
+    package_url_prefix="https://resource.fit2cloud.com/1panel/package"
+  else
+    echo "无效输入，请输入 1 或 2。"
+    exit 1
+  fi
+}
+
+# 获取当前1Panel版本和模式
+get_current_version_and_mode() {
+  if [[ -f /usr/local/bin/1panel ]]; then
+    CURRENT_VERSION=$(1panel version | grep -oP 'version:\s*\K.*')
+    CURRENT_MODE=$(1panel version | grep -oP 'mode:\s*\K.*')
+  else
+    echo "无法获取当前1Panel版本和模式"
+    exit 1
+  fi
+}
+
+# 获取最新的1Panel版本
+get_latest_version() {
+  PANELVER=$(curl -fsSL "$version_url")
+}
+
+# 比较版本
+compare_versions() {
+  if [[ $CURRENT_VERSION == $PANELVER ]]; then
+    echo "当前版本 $CURRENT_VERSION 已是最新版本 $PANELVER"
+    exit 0
+  fi
+}
+
 # 检查可用的包管理器
 check_package_manager() {
   if command -v apt >/dev/null 2>&1; then
@@ -41,30 +84,6 @@ check_1panel_existence() {
   if [[ ! -f /usr/local/bin/1panel ]]; then
     echo "1Panel 未安装，不需要执行 1Panel 升级脚本！"
     exit 1
-  fi
-}
-
-# 获取当前1Panel版本和模式
-get_current_version_and_mode() {
-  if [[ -f /usr/local/bin/1panel ]]; then
-    CURRENT_VERSION=$(1panel version | grep -oP 'version:\s*\K.*')
-    CURRENT_MODE=$(1panel version | grep -oP 'mode:\s*\K.*')
-  else
-    echo "无法获取当前1Panel版本和模式"
-    exit 1
-  fi
-}
-
-# 获取最新的1Panel版本
-get_latest_version() {
-  PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/latest)
-}
-
-# 比较版本
-compare_versions() {
-  if [[ $CURRENT_VERSION == $PANELVER ]]; then
-    echo "当前版本 $CURRENT_VERSION 已是最新版本 $PANELVER"
-    exit 0
   fi
 }
 
@@ -94,16 +113,11 @@ download_1panel() {
     exit 1
   fi
   package_file_name="1panel-${PANELVER}-linux-${ARCH}.tar.gz"
-  package_download_url="https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/${PANELVER}/release/${package_file_name}"
+  package_download_url="${package_url_prefix}/${CURRENT_MODE}/${PANELVER}/release/${package_file_name}"
   echo "正在尝试下载 ${package_download_url}"
   curl -sSL -o ${package_file_name} "$package_download_url" || {
-    echo "下载失败，切换到备选链接"
-    package_download_url="https://github.com/wanghe-fit2cloud/1Panel/releases/download/${PANELVER}/${package_file_name}"
-    echo "正在下载备选链接 ${package_download_url}"
-    curl -sSL -o ${package_file_name} "$package_download_url" || {
-      echo "备选链接下载失败"
-      exit 1
-    }
+    echo "下载失败"
+    exit 1
   }
   tar zxvf ${package_file_name} --strip-components 1
 }
@@ -162,6 +176,7 @@ main() {
   confirm_upgrade
   local confirm_result=$?
   if [[ $confirm_result -eq 0 ]]; then
+    select_version_type
     check_package_manager
     check_1panel_existence
     get_current_version_and_mode
