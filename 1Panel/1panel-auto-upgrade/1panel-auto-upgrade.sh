@@ -193,7 +193,7 @@ main() {
     sleep $sleep_duration
 
     # 获取当前1Panel版本
-    CURRENT_VER=$(/usr/local/bin/1panel version | awk '/1panel version:/{print $3}')
+    CURRENT_VER=$(/usr/local/bin/1panel version | grep -oP 'version:\s*\K.*')
     # 获取最新1Panel版本
     PANELVER=$(curl -s https://resource.fit2cloud.com/1panel/package/stable/latest)
 
