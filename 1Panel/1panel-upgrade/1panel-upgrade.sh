@@ -57,6 +57,10 @@ get_current_version_and_mode() {
   if [[ -f /usr/local/bin/1panel ]]; then
     CURRENT_VERSION=$(1panel version | grep -oP 'version:\s*\K.*')
     CURRENT_MODE=$(1panel version | grep -oP 'mode:\s*\K.*')
+    if [[ -z "$CURRENT_MODE" ]]; then
+      echo "获取当前 1Panel 版本模式失败"
+      exit 1
+    fi
   else
     echo "无法获取当前1Panel版本和模式"
     exit 1
@@ -118,6 +122,7 @@ update_and_install_packages() {
     exit 1
   fi
 }
+
 
 # 下载 1Panel
 download_1panel() {
@@ -198,27 +203,25 @@ cleanup() {
 
 # 主函数
 main() {
+  set -euo pipefail
   check_root
-  confirm_upgrade
-  local confirm_result=$?
-  if [[ $confirm_result -eq 0 ]]; then
-    check_package_manager
-    check_1panel_existence
-    get_current_version_and_mode
-    select_version_type
-    get_latest_version
-    compare_versions
-    update_and_install_packages
-    download_1panel
-    update_1pctl_basedir
-    install_1panel
-    cleanup
-    update_database
-    restart_1panel
-  else
+  check_1panel_existence
+  if ! confirm_upgrade; then
     echo "已取消执行 1Panel 升级操作"
-    exit 0  # 直接退出脚本
+    exit 0
   fi
+  check_package_manager
+  get_current_version_and_mode
+  select_version_type
+  get_latest_version
+  compare_versions
+  update_and_install_packages
+  download_1panel
+  update_1pctl_basedir
+  install_1panel
+  cleanup
+  update_database
+  restart_1panel
 }
 
 # 调用主函数
