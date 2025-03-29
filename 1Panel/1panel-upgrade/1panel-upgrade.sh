@@ -10,31 +10,46 @@ check_root() {
 
 # 确认是否执行升级脚本
 confirm_upgrade() {
-  read -p "是否执行1Panel升级操作？(y/n): " choice
-  if [[ $choice == "y" || $choice == "Y" ]]; then
-    return 0  # 返回 0 表示确认执行升级操作
-  else
-    return 1  # 返回 1 表示取消升级操作
-  fi
+  while true; do
+    read -p "是否执行 1Panel 升级操作？(y是/n否/q退出): " choice
+    case "$choice" in
+      [yY]) return 0 ;;
+      [nN]) return 1 ;;
+      [qQ]) 
+        echo "已取消升级并退出脚本"
+        exit 0
+        ;;
+      *) 
+        echo "无效输入，请输入 y/n/q（不区分大小写）"
+        ;;
+    esac
+  done
 }
 
 # 询问用户选择版本
 select_version_type() {
-  read -p "请选择1Panel版本（输入 '1' 为国际版，输入 '2' 为国内版）: " version_choice
-  if [[ $version_choice == "1" ]]; then
-    # 选择国际版
-    VERSION_TYPE="international"
-    version_url="https://resource.1panel.hk/stable/latest"
-    package_url_prefix="https://resource.1panel.hk"
-  elif [[ $version_choice == "2" ]]; then
-    # 选择国内版
-    VERSION_TYPE="domestic"
-    version_url="https://resource.fit2cloud.com/1panel/package/stable/latest"
-    package_url_prefix="https://resource.fit2cloud.com/1panel/package"
-  else
-    echo "无效输入，请输入 1 或 2。"
-    exit 1
-  fi
+  while true; do
+    read -p "请选择 1Panel 版本（1国际版/2国内版/q退出）: " version_choice
+    case "$version_choice" in
+      1)
+        VERSION_TYPE="international"
+        package_url_prefix="https://resource.1panel.hk"
+        break
+        ;;
+      2)
+        VERSION_TYPE="domestic"
+        package_url_prefix="https://resource.fit2cloud.com/1panel/package"
+        break
+        ;;
+      [qQ])
+        echo "已取消版本选择并退出脚本"
+        exit 0
+        ;;
+      *)
+        echo "无效输入，请输入 1/2/q（不区分大小写）"
+        ;;
+    esac
+  done
 }
 
 # 获取当前1Panel版本和模式
@@ -50,6 +65,11 @@ get_current_version_and_mode() {
 
 # 获取最新的1Panel版本
 get_latest_version() {
+  if [[ $VERSION_TYPE == "international" ]]; then
+    version_url="https://resource.1panel.hk/stable/latest"  # 国际版仅有此版本
+  elif [[ $VERSION_TYPE == "domestic" ]]; then
+    version_url="https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/latest"  # 国内版使用 CURRENT_MODE
+  fi
   PANELVER=$(curl -fsSL "$version_url")
 }
 
@@ -89,8 +109,14 @@ check_1panel_existence() {
 
 # 更新包管理器并安装软件包
 update_and_install_packages() {
-  $update_command
-  $install_command "${packages[@]}"
+  if ! $update_command; then
+    echo "包管理器更新失败！"
+    exit 1
+  fi
+  if ! $install_command "${packages[@]}"; then
+    echo "依赖安装失败！"
+    exit 1
+  fi
 }
 
 # 下载 1Panel
@@ -119,7 +145,7 @@ download_1panel() {
     echo "下载失败"
     exit 1
   }
-  tar zxvf ${package_file_name} --strip-components 1
+  tar zxvf ${package_file_name} --strip-components 1 || { echo "解压失败"; exit 1; }
 }
 
 # 更新 1pctl 文件中的 BASE_DIR
@@ -176,10 +202,10 @@ main() {
   confirm_upgrade
   local confirm_result=$?
   if [[ $confirm_result -eq 0 ]]; then
-    select_version_type
     check_package_manager
     check_1panel_existence
     get_current_version_and_mode
+    select_version_type
     get_latest_version
     compare_versions
     update_and_install_packages
