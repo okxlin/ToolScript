@@ -168,7 +168,8 @@ check_directory() {
       case "$answer" in
         [Yy]* )
           echo "正在删除 $target_dir 下的所有内容..."
-          find "$target_dir" -mindepth 1 -exec rm -rf {} +
+          find "$target_dir" -mindepth 1 -delete 2>/dev/null || \
+          find "$target_dir" -path "$target_dir" -prune -o -exec rm -rf {} +
           ;;
         * )
           echo "请清空目录 $target_dir 后重新运行脚本。" >&2
@@ -205,7 +206,7 @@ download_and_unzip() {
   fi
 
   echo "开始解压 opt-1panel-data.zip 到 $target_dir..."
-  unzip -o -P "$ZIP_PASS" opt-1panel-data.zip
+  unzip -q -o -P "$ZIP_PASS" opt-1panel-data.zip
   if [ $? -ne 0 ]; then
     echo "错误：解压文件失败。" >&2
     exit 1
