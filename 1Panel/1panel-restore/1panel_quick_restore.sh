@@ -237,10 +237,10 @@ install_docker_1panel() {
 }
 
 ######################################
-# 函数：递归查找 /opt/1panel/apps/local 下的 docker-compose.yml，并执行 docker-compose up -d
+# 函数：递归查找 /opt/1panel/apps 下的 docker-compose.yml，并执行 docker-compose up -d
 ######################################
 traverse_and_start_docker_compose() {
-  base_dir="/opt/1panel/apps/local"
+  base_dir="/opt/1panel/apps"
   if [ ! -d "$base_dir" ]; then
     echo "注意：目录 $base_dir 不存在，跳过 docker-compose 部分。" >&2
     return
