@@ -33,7 +33,7 @@ select_version_type() {
     case "$version_choice" in
       1)
         VERSION_TYPE="international"
-        package_url_prefix="https://resource.1panel.hk"
+        package_url_prefix="https://resource.1panel.pro"
         break
         ;;
       2)
@@ -70,7 +70,7 @@ get_current_version_and_mode() {
 # 获取最新的1Panel版本
 get_latest_version() {
   if [[ $VERSION_TYPE == "international" ]]; then
-    version_url="https://resource.1panel.hk/stable/latest"  # 国际版仅有此版本
+    version_url="https://resource.1panel.pro/stable/latest"  # 国际版仅有此版本
   elif [[ $VERSION_TYPE == "domestic" ]]; then
     version_url="https://resource.fit2cloud.com/1panel/package/${CURRENT_MODE}/latest"  # 国内版使用 CURRENT_MODE
   fi
