@@ -4,8 +4,8 @@ set -euo pipefail  # 启用严格模式：遇到错误立即退出，未定义�
 # ----------------------
 # 用户配置区（按需修改）
 # ----------------------
-TXT_API_URL="https://60s-api-cf.viki.moe/v2/60s?encoding=text"
-PIC_API_URL="https://api.03c3.cn/api/zb"
+TXT_API_URL="https://60s.viki.moe/v2/60s?encoding=text"
+PIC_API_URL="https://60s.viki.moe/v2/60s?encoding=image"
 
 # Telegram 配置（留空则不启用）
 TG_BOT_TOKEN=""
