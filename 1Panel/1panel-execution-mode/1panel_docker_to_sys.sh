@@ -221,7 +221,7 @@ confirm_path_and_version() {
     echo -e "${BLUE}>>> 步骤 1/4: 确认数据目录${NC}"
     local default_base="/opt"
     while true; do
-        read -p "请输入 1Panel 数据目录 (默认: /opt): " input_path
+        read -p "请输入 1Panel 数据 Base 目录 (默认: /opt): " input_path
         local check_path="${input_path:-"$default_base"}"
         check_path=${check_path%/}
         [[ "$check_path" == *"/1panel" ]] && check_path=$(dirname "$check_path")
@@ -232,12 +232,12 @@ confirm_path_and_version() {
 
         if [[ -f "$v2_db" ]]; then
             DETECTED_VERSION="v2"; BASE_DIR="${check_path}"; PANEL_DIR="${target_panel_dir}"
-            echo -e "${GREEN}✅ 发现 V2 版本${NC}"; break
+            echo -e "${GREEN}✅ 发现 V2 版本 (BaseDir: ${BASE_DIR})${NC}"; break
         elif [[ -f "$v1_db" ]]; then
             DETECTED_VERSION="v1"; BASE_DIR="${check_path}"; PANEL_DIR="${target_panel_dir}"
-            echo -e "${GREEN}✅ 发现 V1 版本${NC}"; break
+            echo -e "${GREEN}✅ 发现 V1 版本 (BaseDir: ${BASE_DIR})${NC}"; break
         else
-            echo -e "${RED}未找到数据库文件。${NC}"
+            echo -e "${RED}未找到数据库文件。请确认路径是否正确。${NC}"
         fi
     done
 }
@@ -459,7 +459,6 @@ migrate_to_docker() {
         use_reset=true
         env_args+=(-e "RESET=true")
         
-        # 端口
         read -p "端口 PORT (留空使用 10086): " env_port
         if [ -n "$env_port" ]; then
             env_args+=(-e "PORT=$env_port")
@@ -468,7 +467,6 @@ migrate_to_docker() {
             echo -e "${YELLOW}  -> 将使用默认端口: 10086${NC}"
         fi
 
-        # 用户
         read -p "用户 USERNAME (留空使用 1panel): " env_user
         if [ -n "$env_user" ]; then
             env_args+=(-e "USERNAME=$env_user")
@@ -477,7 +475,6 @@ migrate_to_docker() {
             echo -e "${YELLOW}  -> 将使用默认用户: 1panel${NC}"
         fi
 
-        # 密码 (安全警告)
         read -p "密码 PASSWORD (留空生成随机密码): " env_pass
         if [ -n "$env_pass" ]; then
             env_args+=(-e "PASSWORD=$env_pass")
@@ -486,13 +483,18 @@ migrate_to_docker() {
             echo -e "${RED}  -> ⚠️  未设置密码，将自动生成随机密码！(请在启动后查看日志)${NC}"
         fi
 
-        # 入口
         read -p "入口 ENTRANCE (留空使用 entrance): " env_ent
         if [ -n "$env_ent" ]; then
             env_args+=(-e "ENTRANCE=$env_ent")
             echo -e "${GREEN}  -> 已设置入口: $env_ent${NC}"
         else
             echo -e "${YELLOW}  -> 将使用默认入口: entrance${NC}"
+        fi
+    else
+        local flag_file="${PANEL_DIR}/.docker_initialized"
+        if [ ! -f "$flag_file" ]; then
+            echo -e "${BLUE}>>> 智能防御: 自动在 ${PANEL_DIR} 创建 .docker_initialized 防重置标志。${NC}"
+            touch "$flag_file"
         fi
     fi
 
@@ -514,7 +516,6 @@ migrate_to_docker() {
         echo -e "${GREEN}✅ 容器启动成功: ${target_container_name}${NC}"
         cleanup_host_legacy
         
-        # === 安全警告 ===
         echo -e "\n${RED}================== [重要安全提示] ==================${NC}"
         if [[ "$config_env" =~ ^[yY]$ ]] && [ -z "$env_pass" ]; then
             echo -e "${RED}⚠️  注意：您启用了重置模式但未设置密码。${NC}"
@@ -524,9 +525,6 @@ migrate_to_docker() {
             echo -e "${BLUE}或者查看完整日志: docker logs ${target_container_name}${NC}"
         else
             echo -e "${BLUE}提示：管理面板请使用: docker exec -it ${target_container_name} 1pctl user-info${NC}"
-            echo -e "${RED}如果密码参数未自定义，将强制生成一个随机密码并覆盖您的旧密码！${NC}"
-            echo -e "${RED}请立即执行以下命令查看日志中的随机密码：${NC}"
-            echo -e "${GREEN}docker logs ${target_container_name} 2>&1 | grep '随机密码'${NC}"
         fi
         echo -e "${RED}====================================================${NC}\n"
     else
