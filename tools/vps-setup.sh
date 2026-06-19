@@ -3,7 +3,8 @@
 set -o pipefail
 
 TIMEZONE="Asia/Shanghai"
-DOCKER_COMPOSE_WRAPPER="/usr/local/bin/docker-compose"
+DOCKER_COMPOSE_WRAPPER="${DOCKER_COMPOSE_WRAPPER:-/usr/local/bin/docker-compose}"
+DOCKER_COMPOSE_LEGACY_SYMLINK="${DOCKER_COMPOSE_LEGACY_SYMLINK:-/usr/bin/docker-compose}"
 DOCKER_DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
 CHRONY_MARKER_BEGIN="# BEGIN ToolScript vps-setup timesync"
 CHRONY_MARKER_END="# END ToolScript vps-setup timesync"
@@ -369,7 +370,7 @@ get_http_timestamp() {
     local url="$1"
     local http_date
 
-    http_date=$(curl -fsSI --insecure --connect-timeout 5 --max-time 10 "$url" 2>/dev/null |
+    http_date=$(curl -fsSI --connect-timeout 5 --max-time 10 "$url" 2>/dev/null |
         awk '/^[Dd][Aa][Tt][Ee]:/ {sub(/\r$/, ""); sub(/^[Dd][Aa][Tt][Ee]:[[:space:]]*/, ""); print; exit}')
 
     if [ -z "$http_date" ]; then
@@ -428,6 +429,28 @@ sync_system_time() {
     log "时间同步操作完成。当前时间：$current_time (Time synchronization completed. Current time: $current_time)"
 }
 
+print_legacy_bbr_instructions() {
+    cat <<'EOF'
+内核版本低于 4.9，无法直接启用内核内置 BBR。
+如确认要使用 teddysun/across 的旧内核 BBR 脚本，请手动执行下面步骤；当前脚本不会自动下载或执行第三方内核脚本。
+
+安全提示：
+  - 仅通过 HTTPS 下载，不要关闭 TLS 证书校验。
+  - 执行前先查看 sha256sum，并用 less 审阅脚本内容。
+  - 该脚本会以 root 权限修改内核/启动项，建议先在可回滚的 VPS 上测试或做好快照。
+
+推荐手动命令：
+  curl -fsSL https://raw.githubusercontent.com/teddysun/across/master/bbr.sh -o /opt/bbr.sh
+  sha256sum /opt/bbr.sh
+  less /opt/bbr.sh
+  chmod 700 /opt/bbr.sh
+  bash /opt/bbr.sh
+
+如果 GitHub Raw 不可达，可只替换下载 URL，例如：
+  curl -fsSL https://cdn.jsdelivr.net/gh/teddysun/across@master/bbr.sh -o /opt/bbr.sh
+EOF
+}
+
 # 内核启动bbr设置
 enable_bbr() {
     echo "启用BBR拥塞控制算法... (Enabling BBR congestion control...)"
@@ -441,7 +464,7 @@ EOF
         sysctl --system
         echo "BBR 已启用 (BBR enabled)."
     else
-        echo "内核版本低于 4.9，当前脚本不会自动执行第三方BBR脚本。请先升级内核或手动使用可信脚本。(Kernel version is less than 4.9. Upgrade the kernel or use a trusted script manually.)"
+        print_legacy_bbr_instructions
     fi
 }
 
@@ -1102,17 +1125,30 @@ docker_compose_available() {
     docker compose version >/dev/null 2>&1 || docker-compose --version >/dev/null 2>&1
 }
 
+create_docker_compose_wrapper() {
+    local wrapper="${DOCKER_COMPOSE_WRAPPER:-/usr/local/bin/docker-compose}"
+    local legacy_symlink="${DOCKER_COMPOSE_LEGACY_SYMLINK:-/usr/bin/docker-compose}"
+
+    mkdir -p "$(dirname "$wrapper")" || return 1
+    cat > "$wrapper" <<'EOF'
+#!/bin/sh
+exec docker compose "$@"
+EOF
+    chmod +x "$wrapper" || return 1
+
+    if [ -n "$legacy_symlink" ] && [ "$legacy_symlink" != "$wrapper" ] && [ ! -e "$legacy_symlink" ]; then
+        mkdir -p "$(dirname "$legacy_symlink")" || return 1
+        ln -s "$wrapper" "$legacy_symlink" || return 1
+    fi
+}
+
 ensure_legacy_docker_compose_command() {
     if command -v docker-compose >/dev/null 2>&1; then
         return 0
     fi
 
     if docker compose version >/dev/null 2>&1; then
-        cat > "$DOCKER_COMPOSE_WRAPPER" <<'EOF'
-#!/bin/sh
-exec docker compose "$@"
-EOF
-        chmod +x "$DOCKER_COMPOSE_WRAPPER"
+        create_docker_compose_wrapper
         return $?
     fi
 
@@ -1179,9 +1215,25 @@ install_docker_compose_standalone() {
     if curl -fsSL --connect-timeout 10 --max-time 120 "$base_url" -o "$tmp_dir/$asset" &&
        curl -fsSL --connect-timeout 10 --max-time 30 "$base_url.sha256" -o "$tmp_dir/$asset.sha256" &&
        (cd "$tmp_dir" && sha256sum -c "$asset.sha256" >/dev/null 2>&1); then
-        install -m 0755 "$tmp_dir/$asset" "$DOCKER_COMPOSE_WRAPPER"
-        if [ ! -e /usr/bin/docker-compose ]; then
-            ln -s "$DOCKER_COMPOSE_WRAPPER" /usr/bin/docker-compose
+        mkdir -p "$(dirname "$DOCKER_COMPOSE_WRAPPER")" || {
+            rm -rf "$tmp_dir"
+            return 1
+        }
+        install -m 0755 "$tmp_dir/$asset" "$DOCKER_COMPOSE_WRAPPER" || {
+            rm -rf "$tmp_dir"
+            return 1
+        }
+        if [ -n "$DOCKER_COMPOSE_LEGACY_SYMLINK" ] &&
+           [ "$DOCKER_COMPOSE_LEGACY_SYMLINK" != "$DOCKER_COMPOSE_WRAPPER" ] &&
+           [ ! -e "$DOCKER_COMPOSE_LEGACY_SYMLINK" ]; then
+            mkdir -p "$(dirname "$DOCKER_COMPOSE_LEGACY_SYMLINK")" || {
+                rm -rf "$tmp_dir"
+                return 1
+            }
+            ln -s "$DOCKER_COMPOSE_WRAPPER" "$DOCKER_COMPOSE_LEGACY_SYMLINK" || {
+                rm -rf "$tmp_dir"
+                return 1
+            }
         fi
         rm -rf "$tmp_dir"
         return 0
@@ -1196,7 +1248,10 @@ install_docker_compose() {
     echo "正在安装 Docker Compose... (Installing Docker Compose...)"
 
     if docker_compose_available; then
-        ensure_legacy_docker_compose_command || true
+        ensure_legacy_docker_compose_command || {
+            warn "Docker Compose插件可用，但无法创建docker-compose兼容命令。"
+            return 1
+        }
         echo "Docker Compose已经安装 (Docker Compose already installed)."
         return 0
     fi
@@ -1209,7 +1264,10 @@ install_docker_compose() {
     }
 
     if docker_compose_available; then
-        ensure_legacy_docker_compose_command || true
+        ensure_legacy_docker_compose_command || {
+            warn "Docker Compose已安装，但无法创建docker-compose兼容命令。"
+            return 1
+        }
         echo "Docker Compose已安装 (Docker Compose installed)."
         return 0
     fi
@@ -1234,7 +1292,7 @@ install_utilities() {
 check_components() {
     echo "检查系统组件... (Checking system components...)"
     # 定义要检查的软件列表
-    components=("docker" "curl" "wget" "mtr" "screen" "zip" "unzip" "tar" "lsof")
+    components=("docker" "docker-compose" "curl" "wget" "mtr" "screen" "zip" "unzip" "tar" "lsof")
 
     # 遍历检查软件是否安装
     for component in "${components[@]}"; do
