@@ -366,7 +366,7 @@ get_http_timestamp() {
     local url="$1"
     local http_date
 
-    http_date=$(curl -fsSI --insecure --connect-timeout 5 --max-time 10 "$url" 2>/dev/null |
+    http_date=$(curl -fsSI --connect-timeout 5 --max-time 10 "$url" 2>/dev/null |
         awk '/^[Dd][Aa][Tt][Ee]:/ {sub(/\r$/, ""); sub(/^[Dd][Aa][Tt][Ee]:[[:space:]]*/, ""); print; exit}')
 
     if [ -z "$http_date" ]; then
