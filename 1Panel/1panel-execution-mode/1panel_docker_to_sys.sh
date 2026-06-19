@@ -40,27 +40,79 @@ check_sys() {
     fi
 }
 
+package_manager() {
+    if command -v apt-get &>/dev/null; then echo "apt"
+    elif command -v yum &>/dev/null; then echo "yum"
+    elif command -v dnf &>/dev/null; then echo "dnf"
+    elif command -v apk &>/dev/null; then echo "apk"
+    else return 1; fi
+}
+
+package_name_for_dependency() {
+    local manager="$1"
+    local dep="$2"
+
+    case "${manager}:${dep}" in
+        apt:docker) echo "docker.io" ;;
+        apt:awk) echo "gawk" ;;
+        yum:awk|dnf:awk) echo "gawk" ;;
+        yum:sqlite3|dnf:sqlite3) echo "sqlite" ;;
+        apk:sqlite3) echo "sqlite" ;;
+        apk:awk) echo "gawk" ;;
+        *) echo "$dep" ;;
+    esac
+}
+
+install_dependency_package() {
+    local dep="$1"
+    local manager
+    local package_name
+
+    manager=$(package_manager) || {
+        echo -e "${RED}无法安装 ${dep}: 未找到支持的包管理器${NC}"
+        exit 1
+    }
+    package_name=$(package_name_for_dependency "$manager" "$dep")
+
+    echo "安装依赖: ${dep} (${package_name}) ..."
+    if ! case "$manager" in
+        apt) apt-get update && apt-get install -y "$package_name" ;;
+        yum) yum install -y "$package_name" ;;
+        dnf) dnf install -y "$package_name" ;;
+        apk) apk add "$package_name" ;;
+        *) echo -e "${RED}无法安装 ${dep}${NC}"; exit 1 ;;
+    esac; then
+        echo -e "${RED}依赖安装失败: ${dep} (${package_name})${NC}"
+        if [[ "$dep" == "docker" && ( "$manager" == "yum" || "$manager" == "dnf" ) ]]; then
+            echo -e "${YELLOW}提示: RHEL/CentOS 默认仓库通常不提供 Docker Engine，请先配置 Docker CE 仓库或手动安装 Docker 后重试。${NC}"
+        fi
+        exit 1
+    fi
+
+    if ! command -v "$dep" &>/dev/null; then
+        echo -e "${RED}依赖安装后仍未找到命令: ${dep}${NC}"
+        exit 1
+    fi
+}
+
 check_dependencies() {
     local dependencies=("curl" "tar" "awk" "sed" "docker" "grep" "sqlite3")
     if [[ "$INIT_SYSTEM" == "openrc" ]]; then
-        if ! command -v bash >/dev/null 2>&1; then apk add bash; fi
-        if ! apk info | grep -q libc6-compat; then apk add libc6-compat; fi
-        if ! apk info | grep -q gcompat; then apk add gcompat; fi
+        if ! command -v bash >/dev/null 2>&1; then install_dependency_package bash; fi
+        if ! apk info -e libc6-compat >/dev/null 2>&1; then apk add libc6-compat || exit 1; fi
+        if ! apk info -e gcompat >/dev/null 2>&1; then apk add gcompat || exit 1; fi
     fi
     for dep in "${dependencies[@]}"; do
         if ! command -v "$dep" &>/dev/null; then
-            echo "安装依赖: $dep ..."
-            if command -v apt-get &>/dev/null; then apt-get update && apt-get install -y "$dep"
-            elif command -v yum &>/dev/null; then yum install -y "$dep"
-            elif command -v dnf &>/dev/null; then dnf install -y "$dep"
-            elif command -v apk &>/dev/null; then apk add "$dep"
-            else echo -e "${RED}无法安装 $dep${NC}"; exit 1; fi
+            install_dependency_package "$dep"
         fi
     done
 }
 
 get_architecture() {
-    local os_check=$(uname -a)
+    local os_check
+
+    os_check=$(uname -a)
     if [[ $os_check =~ 'x86_64' ]]; then ARCH="amd64"
     elif [[ $os_check =~ 'arm64' ]] || [[ $os_check =~ 'aarch64' ]]; then ARCH="arm64"
     elif [[ $os_check =~ 'armv7l' ]]; then ARCH="armv7"
@@ -77,13 +129,13 @@ install_fake_systemctl() {
     cat > /usr/local/bin/systemctl << 'EOF'
 #!/bin/sh
 action=${1}
-service=$(echo ${2} | sed 's/\.\(service\|socket\)//g')
+service=$(echo "${2:-}" | sed 's/\.\(service\|socket\)//g')
 case "${action}" in
     start) rc-service "${service}" start ;;
     stop) rc-service "${service}" stop ;;
     restart) rc-service "${service}" restart ;;
     reload) rc-service "${service}" reload || rc-service "${service}" restart ;;
-    daemon-reload) return 0 ;;
+    daemon-reload) exit 0 ;;
     status) rc-service "${service}" status ;;
     enable) rc-update add "${service}" ;;
     disable) rc-update del "${service}" ;;
@@ -119,27 +171,27 @@ EOF
 
 svc_stop() {
     if [[ "$INIT_SYSTEM" == "openrc" ]]; then
-        rc-service $1 stop >/dev/null 2>&1
-        rc-update del $1 >/dev/null 2>&1
+        rc-service "$1" stop >/dev/null 2>&1
+        rc-update del "$1" >/dev/null 2>&1
     else
-        systemctl stop $1 >/dev/null 2>&1
-        systemctl disable $1 >/dev/null 2>&1
+        systemctl stop "$1" >/dev/null 2>&1
+        systemctl disable "$1" >/dev/null 2>&1
     fi
 }
 
 svc_start() {
     if [[ "$INIT_SYSTEM" == "openrc" ]]; then
-        rc-update add $1; rc-service $1 start
+        rc-update add "$1"; rc-service "$1" start
     else
-        systemctl enable $1; systemctl start $1
+        systemctl enable "$1"; systemctl start "$1"
     fi
 }
 
 svc_check() {
     if [[ "$INIT_SYSTEM" == "openrc" ]]; then
-        rc-service $1 status | grep -q "started"
+        rc-service "$1" status | grep -q "started"
     else
-        systemctl is-active --quiet $1
+        systemctl is-active --quiet "$1"
     fi
 }
 
@@ -165,9 +217,158 @@ prevent_host_duplicate() {
 }
 
 prevent_docker_duplicate() {
-    if docker ps --format '{{.Names}}' | grep -iq "1panel"; then
+    if docker ps -a --format '{{.Names}}' | grep -iq "1panel"; then
         echo -e "${RED}❌ 错误: 1Panel 容器已存在！请勿重复迁移。${NC}"; exit 1
     fi
+}
+
+docker_container_exists() {
+    local container_name="$1"
+
+    docker ps -a --format '{{.Names}}' | grep -Fxq "$container_name"
+}
+
+wait_for_container_running() {
+    local container_name="$1"
+    local timeout="${2:-20}"
+    local i
+
+    for ((i=0; i<timeout; i++)); do
+        if [[ "$(docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null)" == "true" ]]; then
+            sleep 3
+            [[ "$(docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null)" == "true" ]] && return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+restart_container_if_present() {
+    local container_name="$1"
+
+    if docker_container_exists "$container_name"; then
+        echo -e "${YELLOW}>>> 尝试恢复旧容器: ${container_name}${NC}"
+        docker start "$container_name" >/dev/null 2>&1 || true
+    fi
+}
+
+sed_escape_replacement() {
+    printf '%s' "$1" | sed 's/[\\&#]/\\&/g'
+}
+
+set_ctl_value() {
+    local ctl_file="$1"
+    local key="$2"
+    local value="$3"
+    local escaped_value
+
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo -e "${RED}非法 1pctl 配置键: ${key}${NC}" >&2
+        return 1
+    fi
+
+    escaped_value=$(sed_escape_replacement "$value")
+    if grep -q "^${key}=" "$ctl_file"; then
+        sed -i "s#^${key}=.*#${key}=${escaped_value}#g" "$ctl_file"
+    else
+        printf '%s=%s\n' "$key" "$value" >>"$ctl_file"
+    fi
+}
+
+replace_panel_dir_in_file() {
+    local file="$1"
+    local escaped_panel_dir
+
+    escaped_panel_dir=$(sed_escape_replacement "$PANEL_DIR")
+    sed -i "s#/opt/1panel#${escaped_panel_dir}#g" "$file"
+}
+
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 300 \
+        -o "$output" "$url"
+}
+
+validate_package_file() {
+    local package_name="$1"
+    local file_size
+
+    if [[ ! -f "$package_name" ]]; then
+        echo -e "${RED}下载失败: 未找到 ${package_name}${NC}"
+        return 1
+    fi
+
+    file_size=$(wc -c <"$package_name")
+    if [[ "$file_size" -lt 1024000 ]]; then
+        echo -e "${RED}文件校验失败: 安装包过小${NC}"
+        return 1
+    fi
+
+    gzip -t "$package_name" && tar -tzf "$package_name" >/dev/null
+}
+
+checkpoint_sqlite_wal() {
+    local db_dir="${PANEL_DIR}/db"
+    local db_file
+
+    [[ -d "$db_dir" ]] || return 0
+    while IFS= read -r -d '' db_file; do
+        sqlite3 "$db_file" "PRAGMA wal_checkpoint(FULL);" >/dev/null 2>&1 || true
+    done < <(find "$db_dir" -maxdepth 1 -type f -name "*.db" -print0)
+}
+
+clean_db_locks() {
+    local db_dir="${PANEL_DIR}/db"
+
+    [[ -d "$db_dir" ]] || return 0
+    checkpoint_sqlite_wal
+    find "$db_dir" -maxdepth 1 -type f \( -name "*.wal" -o -name "*.shm" -o -name "*.db-wal" -o -name "*.db-shm" \) -delete
+}
+
+apply_panel_permissions() {
+    [[ -d "$PANEL_DIR" ]] || return 0
+
+    if [[ "$EUID" -eq 0 ]]; then
+        chown -R root:root "$PANEL_DIR"
+    fi
+
+    find "$PANEL_DIR" -type d -exec chmod u+rwx {} +
+    find "$PANEL_DIR" -type f -exec chmod u+rw {} +
+
+    if [[ -d "${PANEL_DIR}/db" ]]; then
+        find "${PANEL_DIR}/db" -maxdepth 1 -type f \
+            \( -name "*.db" -o -name "*.db-*" -o -name "*.wal" -o -name "*.shm" \) \
+            -exec chmod 600 {} +
+    fi
+
+    [[ -f "${PANEL_DIR}/tmp/.secret" ]] && chmod 600 "${PANEL_DIR}/tmp/.secret"
+    find "$PANEL_DIR" -type f \
+        \( -name "*.key" -o -name "*.pem" -o -name "*.p12" -o -name "*.pfx" -o -name "*.jks" \) \
+        -exec chmod 600 {} +
+}
+
+start_panel_services_for_version() {
+    local services
+    local svc
+
+    services="1panel-core 1panel-agent"
+    [[ "$DETECTED_VERSION" == "v1" ]] && services="1panel"
+    for svc in $services; do
+        svc_start "$svc"
+    done
+}
+
+panel_services_active() {
+    local services
+    local svc
+
+    services="1panel-core 1panel-agent"
+    [[ "$DETECTED_VERSION" == "v1" ]] && services="1panel"
+    for svc in $services; do
+        svc_check "$svc" || return 1
+    done
 }
 
 clean_db_duplicates() {
@@ -185,9 +386,13 @@ sync_db_to_1pctl() {
     [[ "$DETECTED_VERSION" == "v1" ]] && db_file="${PANEL_DIR}/db/1Panel.db"
 
     if [[ -f "$db_file" ]]; then
-        local real_port=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='SystemPort' ORDER BY rowid DESC LIMIT 1;")
-        local real_entrance=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='SecurityEntrance' ORDER BY rowid DESC LIMIT 1;")
-        local real_user=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='UserName' ORDER BY rowid DESC LIMIT 1;")
+        local real_port
+        local real_entrance
+        local real_user
+
+        real_port=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='SystemPort' ORDER BY rowid DESC LIMIT 1;")
+        real_entrance=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='SecurityEntrance' ORDER BY rowid DESC LIMIT 1;")
+        real_user=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='UserName' ORDER BY rowid DESC LIMIT 1;")
         [ -z "$real_user" ] && real_user=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='SystemUser' ORDER BY rowid DESC LIMIT 1;")
 
         [ -z "$real_port" ] && real_port="10086"
@@ -196,11 +401,11 @@ sync_db_to_1pctl() {
 
         local ctl_file="/usr/local/bin/1pctl"
         if [[ -f "$ctl_file" ]]; then
-            sed -i "s#ORIGINAL_PORT=.*#ORIGINAL_PORT=${real_port}#g" "$ctl_file"
-            sed -i "s#ORIGINAL_ENTRANCE=.*#ORIGINAL_ENTRANCE=${real_entrance}#g" "$ctl_file"
-            sed -i "s#ORIGINAL_USERNAME=.*#ORIGINAL_USERNAME=${real_user}#g" "$ctl_file"
-            sed -i "s#ORIGINAL_PASSWORD=.*#ORIGINAL_PASSWORD=**********#g" "$ctl_file"
-            sed -i "s#BASE_DIR=.*#BASE_DIR=${BASE_DIR}#g" "$ctl_file"
+            set_ctl_value "$ctl_file" "ORIGINAL_PORT" "$real_port"
+            set_ctl_value "$ctl_file" "ORIGINAL_ENTRANCE" "$real_entrance"
+            set_ctl_value "$ctl_file" "ORIGINAL_USERNAME" "$real_user"
+            set_ctl_value "$ctl_file" "ORIGINAL_PASSWORD" "**********"
+            set_ctl_value "$ctl_file" "BASE_DIR" "$BASE_DIR"
             if grep -q "^CHANGE_USER_INFO=" "$ctl_file"; then
                 sed -i 's/^CHANGE_USER_INFO=.*/CHANGE_USER_INFO=use_existing/' "$ctl_file"
             else
@@ -221,7 +426,7 @@ confirm_path_and_version() {
     echo -e "${BLUE}>>> 步骤 1/4: 确认数据目录${NC}"
     local default_base="/opt"
     while true; do
-        read -p "请输入 1Panel 数据 Base 目录 (默认: /opt): " input_path
+        read -r -p "请输入 1Panel 数据 Base 目录 (默认: /opt): " input_path
         local check_path="${input_path:-"$default_base"}"
         check_path=${check_path%/}
         [[ "$check_path" == *"/1panel" ]] && check_path=$(dirname "$check_path")
@@ -244,9 +449,10 @@ confirm_path_and_version() {
 
 confirm_container_name() {
     echo -e "${BLUE}>>> 步骤 2/4: 确认容器名称${NC}"
-    local detected_name=$(docker ps -a --format '{{.Names}}' | grep "1panel" | head -n 1)
+    local detected_name
+    detected_name=$(docker ps -a --format '{{.Names}}' | grep "1panel" | head -n 1)
     local default_name="${detected_name:-"1panel"}"
-    read -p "请输入旧容器名 (默认: ${default_name}): " input_name
+    read -r -p "请输入旧容器名 (默认: ${default_name}): " input_name
     CONTAINER_NAME="${input_name:-"$default_name"}"
 }
 
@@ -260,20 +466,19 @@ read_db_version() {
     fi
 }
 
-clean_db_locks() { rm -f "${PANEL_DIR}/db/"*.wal "${PANEL_DIR}/db/"*.shm; }
-
 backup_data() {
     local max_keep=2
     local backups=()
     mapfile -t backups < <(find "${BASE_DIR}" -maxdepth 1 -name "migrate_backup_*" -type d 2>/dev/null | sort)
     if [[ ${#backups[@]} -ge $max_keep ]]; then
-        local remove_count=$((${#backups[@]} - max_keep))
+        local remove_count=$((${#backups[@]} - max_keep + 1))
         [[ $remove_count -gt 0 ]] && for ((i=0; i<remove_count; i++)); do rm -rf "${backups[$i]}"; done
     fi
-    local backup_dir="${BASE_DIR}/migrate_backup_$(date +%Y%m%d%H%M%S)"
+    local backup_dir
+    backup_dir="${BASE_DIR}/migrate_backup_$(date +%Y%m%d%H%M%S)"
     echo -e "${BLUE}>>> 备份数据至: ${backup_dir}${NC}"
     mkdir -p "${backup_dir}"
-    cp -r "${PANEL_DIR}" "${backup_dir}/"
+    cp -a "${PANEL_DIR}" "${backup_dir}/"
 }
 
 cleanup_host_legacy() {
@@ -297,22 +502,24 @@ migrate_to_host() {
     get_architecture
     
     local tmp_dir=~/1panel-install-temp
+    local services=""
+    local old_container_exists=false
     rm -rf "${tmp_dir}" && mkdir -p "${tmp_dir}" && cd "${tmp_dir}" || exit
 
     local package_name=""
     local download_url=""
     
     if [[ "$DETECTED_VERSION" == "v2" ]]; then
-        local ver="${DB_VERSION:-$(curl -s https://resource.fit2cloud.com/1panel/package/v2/stable/latest)}"
+        local ver="${DB_VERSION:-$(curl -fsSL --proto '=https' --tlsv1.2 https://resource.fit2cloud.com/1panel/package/v2/stable/latest)}"
         package_name="1panel-${ver}-linux-${ARCH}.tar.gz"
         download_url="https://resource.fit2cloud.com/1panel/package/v2/stable/${ver}/release/${package_name}"
     else
         echo "请选择 V1 下载源:"
         echo "1. 国内版 (China/CN) [默认]"
         echo "2. 国际版 (Global)"
-        read -p "选择 [默认: 1]: " v1_source
+        read -r -p "选择 [默认: 1]: " v1_source
         v1_source=${v1_source:-1}
-        local ver="${DB_VERSION:-$(curl -s https://resource.fit2cloud.com/1panel/package/stable/latest)}"
+        local ver="${DB_VERSION:-$(curl -fsSL --proto '=https' --tlsv1.2 https://resource.fit2cloud.com/1panel/package/stable/latest)}"
         package_name="1panel-${ver}-linux-${ARCH}.tar.gz"
         if [[ "$v1_source" == "2" ]]; then
             download_url="https://resource.1panel.pro/stable/${ver}/release/${package_name}"
@@ -322,14 +529,21 @@ migrate_to_host() {
     fi
 
     echo "下载: ${download_url}"
-    curl -fLOk "${download_url}"
-    if [ $? -ne 0 ] || [ ! -f "${package_name}" ]; then echo -e "${RED}下载失败${NC}"; exit 1; fi
-    if [ $(wc -c < "${package_name}") -lt 1024000 ]; then echo -e "${RED}文件校验失败${NC}"; exit 1; fi
-    tar zxvf "${package_name}" --strip-components 1 > /dev/null
+    if ! download_file "${download_url}" "${package_name}"; then echo -e "${RED}下载失败${NC}"; exit 1; fi
+    if ! validate_package_file "${package_name}"; then exit 1; fi
+    tar zxf "${package_name}" --strip-components 1
 
     echo "停止旧容器..."
-    docker stop "${CONTAINER_NAME}" &>/dev/null; sleep 3; docker rm "${CONTAINER_NAME}" &>/dev/null
-    clean_db_locks; backup_data 
+    if docker_container_exists "$CONTAINER_NAME"; then
+        old_container_exists=true
+        docker stop "${CONTAINER_NAME}" &>/dev/null || true
+        sleep 3
+    else
+        echo -e "${YELLOW}⚠️ 未找到旧容器 ${CONTAINER_NAME}，将继续使用现有数据目录迁移。${NC}"
+    fi
+    checkpoint_sqlite_wal
+    backup_data
+    clean_db_locks
 
     echo "部署文件..."
     cp 1pctl /usr/local/bin/ && chmod +x /usr/local/bin/1pctl
@@ -349,46 +563,48 @@ migrate_to_host() {
         [ -d "lang" ] && cp -r lang /usr/local/bin/
 
         if [[ "$INIT_SYSTEM" == "systemd" ]]; then
-            sed -i "s#/opt/1panel#${PANEL_DIR}#g" initscript/1panel-core.service
-            sed -i "s#/opt/1panel#${PANEL_DIR}#g" initscript/1panel-agent.service
+            replace_panel_dir_in_file initscript/1panel-core.service
+            replace_panel_dir_in_file initscript/1panel-agent.service
             cp initscript/1panel-core.service /etc/systemd/system/
             cp initscript/1panel-agent.service /etc/systemd/system/
             systemctl daemon-reload
         else
             generate_openrc_services
         fi
-        SERVICES="1panel-core 1panel-agent"
+        services="1panel-core 1panel-agent"
     else
         cp 1panel /usr/local/bin/ && chmod +x /usr/local/bin/1panel
         ln -sf /usr/local/bin/1panel /usr/bin/1panel
         ln -sf /usr/local/bin/1pctl /usr/bin/1pctl
         [ -f "GeoIP.mmdb" ] && mkdir -p "${PANEL_DIR}/geo/" && cp GeoIP.mmdb "${PANEL_DIR}/geo/"
         if [[ -f "initscript/1panel.service" ]] && [[ "$INIT_SYSTEM" == "systemd" ]]; then
-             sed -i "s#/opt/1panel#${PANEL_DIR}#g" initscript/1panel.service
+             replace_panel_dir_in_file initscript/1panel.service
              cp initscript/1panel.service /etc/systemd/system/
              systemctl daemon-reload
         elif [[ "$INIT_SYSTEM" == "openrc" ]]; then
              generate_openrc_services; mv /etc/init.d/1panel-core /etc/init.d/1panel
              sed -i 's/1panel-core/1panel/g' /etc/init.d/1panel
         fi
-        SERVICES="1panel"
+        services="1panel"
     fi
 
     echo "修复环境..."
-    chown -R root:root "${PANEL_DIR}"
-    chmod -R 755 "${PANEL_DIR}"
+    apply_panel_permissions
     clean_db_duplicates
     sync_db_to_1pctl
     pre_fix_listening_ip
 
     echo "启动服务..."
-    for svc in $SERVICES; do svc_start $svc; done
+    for svc in $services; do svc_start "$svc"; done
     sleep 5
     
     check_target="1panel-core"
     [[ "$DETECTED_VERSION" == "v1" ]] && check_target="1panel"
 
-    if svc_check $check_target; then
+    if panel_services_active; then
+         if [[ "$old_container_exists" == true ]]; then
+             docker rm "${CONTAINER_NAME}" &>/dev/null || true
+         fi
          echo -e "${GREEN}✅ 迁移成功！${NC}"
          echo "------------------------------------------------"
          echo -e "${BLUE}提示: 使用 '1pctl user-info' 查看面板信息。${NC}"
@@ -397,7 +613,7 @@ migrate_to_host() {
          echo -e "${BLUE}提示: 假如登录异常，可以使用 '1pctl update port' 重置面板端口。${NC}"
          echo "------------------------------------------------"
          echo -e "${YELLOW}⚠️ 为了防止旧密码被覆盖或不匹配，推荐立即重置密码${NC}"
-         read -p "是否重置密码？[Y/n] (默认: Y): " reset_now
+         read -r -p "是否重置密码？[Y/n] (默认: Y): " reset_now
          reset_now=${reset_now:-Y}
          if [[ "$reset_now" =~ ^[yY]$ ]]; then
              echo -e "${BLUE}>>> 正在调用 1Panel 命令行工具... (请按提示输入新密码)${NC}"
@@ -407,7 +623,9 @@ migrate_to_host() {
          fi
     else
          echo -e "${RED}❌ 启动失败。${NC}"
-         if [[ "$INIT_SYSTEM" == "systemd" ]]; then journalctl -u $check_target --no-pager -n 20; fi
+         if [[ "$INIT_SYSTEM" == "systemd" ]]; then journalctl -u "$check_target" --no-pager -n 20; fi
+         cleanup_host_legacy
+         if [[ "$old_container_exists" == true ]]; then restart_container_if_present "$CONTAINER_NAME"; fi
          echo -e "${YELLOW}💡 建议: 如无法修复，请迁移回 Docker 模式并在配置时启用 [重置模式]。${NC}"
     fi
     cd / && rm -rf "$tmp_dir"
@@ -426,40 +644,49 @@ migrate_to_docker() {
 
     local detected_tag=""
     if command -v 1pctl &>/dev/null; then
-        local raw_ver=$(1pctl version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1)
+        local raw_ver
+        raw_ver=$(1pctl version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1)
         [ -n "$raw_ver" ] && detected_tag="moelin/1panel:${raw_ver}"
     fi
     
     echo "停止宿主机服务..."
     svc_stop 1panel-core; svc_stop 1panel-agent; svc_stop 1panel
     sleep 2
-    clean_db_duplicates; clean_db_locks; backup_data
+    checkpoint_sqlite_wal
+    backup_data
+    clean_db_duplicates
+    clean_db_locks
 
     echo -e "${BLUE}>>> 步骤 3/4: 配置容器${NC}"
     local default_img="moelin/1panel:latest"
     [ -n "$detected_tag" ] && default_img="$detected_tag"
     [ "$DETECTED_VERSION" == "v1" ] && default_img="moelin/1panel:v1"
     
-    read -p "请输入镜像标签 (默认: ${default_img}): " img_tag
+    read -r -p "请输入镜像标签 (默认: ${default_img}): " img_tag
     img_tag="${img_tag:-"$default_img"}"
 
     local default_name="1panel"
     [ "$DETECTED_VERSION" == "v2" ] && default_name="1panel-v2"
-    read -p "请输入容器名称 (默认: ${default_name}): " target_container_name
+    read -r -p "请输入容器名称 (默认: ${default_name}): " target_container_name
     target_container_name="${target_container_name:-"$default_name"}"
+    if docker_container_exists "$target_container_name"; then
+        echo -e "${RED}❌ 错误: 容器 ${target_container_name} 已存在。${NC}"
+        start_panel_services_for_version
+        exit 1
+    fi
 
     local env_args=()
     local use_reset=false
     echo "------------------------------------------------"
     echo -e "${YELLOW}是否修改端口/密码？(将启用 RESET 模式覆盖数据库)${NC}"
     echo "------------------------------------------------"
-    read -p "修改配置？[y/N] (默认: N): " config_env
+    read -r -p "修改配置？[y/N] (默认: N): " config_env
     
     if [[ "$config_env" =~ ^[yY]$ ]]; then
         use_reset=true
         env_args+=(-e "RESET=true")
         
-        read -p "端口 PORT (留空使用 10086): " env_port
+        read -r -p "端口 PORT (留空使用 10086): " env_port
         if [ -n "$env_port" ]; then
             env_args+=(-e "PORT=$env_port")
             echo -e "${GREEN}  -> 已设置端口: $env_port${NC}"
@@ -467,7 +694,7 @@ migrate_to_docker() {
             echo -e "${YELLOW}  -> 将使用默认端口: 10086${NC}"
         fi
 
-        read -p "用户 USERNAME (留空使用 1panel): " env_user
+        read -r -p "用户 USERNAME (留空使用 1panel): " env_user
         if [ -n "$env_user" ]; then
             env_args+=(-e "USERNAME=$env_user")
             echo -e "${GREEN}  -> 已设置用户: $env_user${NC}"
@@ -475,7 +702,7 @@ migrate_to_docker() {
             echo -e "${YELLOW}  -> 将使用默认用户: 1panel${NC}"
         fi
 
-        read -p "密码 PASSWORD (留空生成随机密码): " env_pass
+        read -r -p "密码 PASSWORD (留空生成随机密码): " env_pass
         if [ -n "$env_pass" ]; then
             env_args+=(-e "PASSWORD=$env_pass")
             echo -e "${GREEN}  -> 已设置密码: (已隐藏)${NC}"
@@ -483,7 +710,7 @@ migrate_to_docker() {
             echo -e "${RED}  -> ⚠️  未设置密码，将自动生成随机密码！(请在启动后查看日志)${NC}"
         fi
 
-        read -p "入口 ENTRANCE (留空使用 entrance): " env_ent
+        read -r -p "入口 ENTRANCE (留空使用 entrance): " env_ent
         if [ -n "$env_ent" ]; then
             env_args+=(-e "ENTRANCE=$env_ent")
             echo -e "${GREEN}  -> 已设置入口: $env_ent${NC}"
@@ -499,20 +726,32 @@ migrate_to_docker() {
     fi
 
     echo -e "${BLUE}>>> 步骤 4/4: 启动容器${NC}"
-    docker pull "${img_tag}"
-    docker run -d --name "${target_container_name}" --restart always --network host \
+    if ! docker pull "${img_tag}"; then
+        echo -e "${RED}❌ 镜像拉取失败，正在恢复宿主机服务。${NC}"
+        start_panel_services_for_version
+        exit 1
+    fi
+
+    if docker run -d --name "${target_container_name}" --restart always --network host \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v /var/lib/docker/volumes:/var/lib/docker/volumes \
         -v /etc/localtime:/etc/localtime:ro \
         -v "${BASE_DIR}:${BASE_DIR}" \
-        -e TZ=Asia/Shanghai -e BASE_DIR="${BASE_DIR}" "${env_args[@]}" "${img_tag}"
+        -e TZ=Asia/Shanghai -e BASE_DIR="${BASE_DIR}" "${env_args[@]}" "${img_tag}"; then
 
-    if [ $? -eq 0 ]; then
         if [ "$use_reset" = true ]; then
             echo -e "${YELLOW}⏳ 检测到重置模式，正在等待容器初始化配置 (约 10 秒)...${NC}"
             sleep 10
         fi
-        
+
+        if ! wait_for_container_running "$target_container_name" 30; then
+            echo -e "${RED}❌ 容器启动后未保持运行，正在恢复宿主机服务。${NC}"
+            docker logs "$target_container_name" --tail 50 2>/dev/null || true
+            docker rm -f "$target_container_name" >/dev/null 2>&1 || true
+            start_panel_services_for_version
+            exit 1
+        fi
+
         echo -e "${GREEN}✅ 容器启动成功: ${target_container_name}${NC}"
         cleanup_host_legacy
         
@@ -528,7 +767,9 @@ migrate_to_docker() {
         fi
         echo -e "${RED}====================================================${NC}\n"
     else
-        echo -e "${RED}❌ 启动失败。${NC}"
+        echo -e "${RED}❌ 启动失败，正在恢复宿主机服务。${NC}"
+        start_panel_services_for_version
+        exit 1
     fi
 }
 
@@ -548,7 +789,7 @@ function main(){
     echo "2. 迁移到 Docker 模式"
     echo "0. 退出"
     
-    read -p "请输入选项 [默认: 1]: " choice
+    read -r -p "请输入选项 [默认: 1]: " choice
     choice=${choice:-1}
     case "$choice" in
         1) migrate_to_host ;;
@@ -558,4 +799,6 @@ function main(){
     esac
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
