@@ -18,6 +18,7 @@ BASE_DIR=""
 PANEL_DIR=""           
 DETECTED_VERSION=""    
 DB_VERSION=""          
+PANEL_EDITION=""
 ARCH=""
 CONTAINER_NAME=""
 INIT_SYSTEM="systemd"
@@ -275,6 +276,161 @@ set_ctl_value() {
     fi
 }
 
+is_valid_panel_edition() {
+    [[ "$1" == "cn" || "$1" == "intl" ]]
+}
+
+is_valid_panel_version() {
+    [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]]
+}
+
+panel_version_at_least() {
+    local current="$1"
+    local minimum="$2"
+    local current_major current_minor current_patch
+    local minimum_major minimum_minor minimum_patch
+
+    is_valid_panel_version "$current" && is_valid_panel_version "$minimum" || return 1
+    current="${current#v}"; current="${current%%-*}"
+    minimum="${minimum#v}"; minimum="${minimum%%-*}"
+    IFS=. read -r current_major current_minor current_patch <<<"$current"
+    IFS=. read -r minimum_major minimum_minor minimum_patch <<<"$minimum"
+
+    ((current_major > minimum_major)) && return 0
+    ((current_major < minimum_major)) && return 1
+    ((current_minor > minimum_minor)) && return 0
+    ((current_minor < minimum_minor)) && return 1
+    ((current_patch >= minimum_patch))
+}
+
+read_panel_edition_from_db() {
+    local version="$1"
+    local panel_dir="$2"
+    local db_file
+    local edition
+
+    db_file="${panel_dir}/db/core.db"
+    [[ "$version" == "v1" ]] && db_file="${panel_dir}/db/1Panel.db"
+    [[ -f "$db_file" ]] || return 1
+
+    edition=$(sqlite3 -readonly "$db_file" \
+        "SELECT lower(trim(value)) FROM settings WHERE key='Edition' ORDER BY rowid DESC LIMIT 1;" \
+        2>/dev/null | head -n 1 | tr -d '[:space:]')
+    is_valid_panel_edition "$edition" || return 1
+    printf '%s\n' "$edition"
+}
+
+read_panel_edition_from_ctl() {
+    local ctl_file="$1"
+    local edition
+
+    [[ -f "$ctl_file" ]] || return 1
+    edition=$(sed -n 's/^PANEL_EDITION=//p' "$ctl_file" | tail -n 1 | tr -d "\"'[:space:]" | tr '[:upper:]' '[:lower:]')
+    is_valid_panel_edition "$edition" || return 1
+    printf '%s\n' "$edition"
+}
+
+resolve_panel_edition() {
+    local version="$1"
+    local panel_dir="$2"
+    local ctl_file="${3:-/usr/local/bin/1pctl}"
+    local release_version="${4:-}"
+    local edition
+
+    edition=$(read_panel_edition_from_db "$version" "$panel_dir" 2>/dev/null || true)
+    if ! is_valid_panel_edition "$edition"; then
+        edition=$(read_panel_edition_from_ctl "$ctl_file" 2>/dev/null || true)
+    fi
+
+    if is_valid_panel_edition "$edition"; then
+        printf '%s\n' "$edition"
+    elif [[ "$version" == "v2" ]] && is_valid_panel_version "$release_version" && \
+        ! panel_version_at_least "$release_version" "v2.1.2"; then
+        printf 'cn\n'
+    else
+        return 1
+    fi
+}
+
+confirm_panel_edition() {
+    local edition
+    local edition_choice
+
+    edition=$(resolve_panel_edition "$DETECTED_VERSION" "$PANEL_DIR" /usr/local/bin/1pctl "$DB_VERSION" 2>/dev/null || true)
+    if is_valid_panel_edition "$edition"; then
+        PANEL_EDITION="$edition"
+    else
+        echo "请选择 1Panel 版本类型:"
+        echo "1. 国内版 (China/CN) [默认]"
+        echo "2. 国际版 (Global/Intl)"
+        read -r -p "选择 [默认: 1]: " edition_choice
+        [[ "$edition_choice" == "2" ]] && PANEL_EDITION="intl" || PANEL_EDITION="cn"
+    fi
+
+    if [[ "$PANEL_EDITION" == "intl" ]]; then
+        echo -e "${GREEN}✅ 版本类型: 国际版 (intl)${NC}"
+    else
+        echo -e "${GREEN}✅ 版本类型: 国内版 (cn)${NC}"
+    fi
+}
+
+panel_download_base() {
+    local version="$1"
+    local edition="$2"
+
+    case "${version}:${edition}" in
+        v2:intl) echo "https://resource.1panel.pro/v2" ;;
+        v2:cn) echo "https://resource.fit2cloud.com/1panel/package/v2" ;;
+        v1:intl) echo "https://resource.1panel.pro" ;;
+        v1:cn) echo "https://resource.fit2cloud.com/1panel/package" ;;
+        *) return 1 ;;
+    esac
+}
+
+moelin_image_tag() {
+    local version="$1"
+    local edition="$2"
+    local release_version="${3:-}"
+    local tag="${release_version:-$version}"
+
+    [[ "$edition" == "intl" ]] && tag="global-${tag}"
+    printf 'moelin/1panel:%s\n' "$tag"
+}
+
+docker_image_tag_exists() {
+    local image="$1"
+
+    docker image inspect "$image" >/dev/null 2>&1 || docker manifest inspect "$image" >/dev/null 2>&1
+}
+
+select_default_moelin_image() {
+    local version="$1"
+    local edition="$2"
+    local release_version="${3:-}"
+    local exact_image
+    local fallback_image
+
+    fallback_image=$(moelin_image_tag "$version" "$edition")
+    [[ -n "$release_version" ]] || { printf '%s\n' "$fallback_image"; return 0; }
+
+    exact_image=$(moelin_image_tag "$version" "$edition" "$release_version")
+    if docker_image_tag_exists "$exact_image"; then
+        printf '%s\n' "$exact_image"
+    else
+        echo -e "${YELLOW}⚠️ 未找到精确镜像 ${exact_image}，默认回退到 ${fallback_image}。${NC}" >&2
+        echo -e "${YELLOW}   回退标签可能触发版本升级，请在启动前确认镜像标签。${NC}" >&2
+        printf '%s\n' "$fallback_image"
+    fi
+}
+
+sync_panel_edition_to_ctl() {
+    local ctl_file="$1"
+    local edition="$2"
+
+    is_valid_panel_edition "$edition" || return 1
+    set_ctl_value "$ctl_file" "PANEL_EDITION" "$edition"
+}
+
 replace_panel_dir_in_file() {
     local file="$1"
     local escaped_panel_dir
@@ -406,6 +562,7 @@ sync_db_to_1pctl() {
             set_ctl_value "$ctl_file" "ORIGINAL_USERNAME" "$real_user"
             set_ctl_value "$ctl_file" "ORIGINAL_PASSWORD" "**********"
             set_ctl_value "$ctl_file" "BASE_DIR" "$BASE_DIR"
+            sync_panel_edition_to_ctl "$ctl_file" "$PANEL_EDITION"
             if grep -q "^CHANGE_USER_INFO=" "$ctl_file"; then
                 sed -i 's/^CHANGE_USER_INFO=.*/CHANGE_USER_INFO=use_existing/' "$ctl_file"
             else
@@ -461,8 +618,15 @@ read_db_version() {
     local db_file=""
     [[ "$DETECTED_VERSION" == "v2" ]] && db_file="${PANEL_DIR}/db/core.db" || db_file="${PANEL_DIR}/db/1Panel.db"
     if [[ -f "$db_file" ]]; then
-        DB_VERSION=$(sqlite3 -readonly "$db_file" "SELECT value FROM settings WHERE key = 'SystemVersion' LIMIT 1;" 2>/dev/null | head -n 1 | tr -d '[:space:]')
-        if [[ -n "$DB_VERSION" ]]; then echo -e "${GREEN}✅ 当前版本号: ${DB_VERSION}${NC}"; else DB_VERSION=""; fi
+        DB_VERSION=$(sqlite3 -readonly "$db_file" \
+            "SELECT value FROM settings WHERE key = 'SystemVersion' ORDER BY rowid DESC LIMIT 1;" \
+            2>/dev/null | head -n 1 | tr -d '[:space:]')
+        if is_valid_panel_version "$DB_VERSION"; then
+            echo -e "${GREEN}✅ 当前版本号: ${DB_VERSION}${NC}"
+        else
+            [[ -n "$DB_VERSION" ]] && echo -e "${YELLOW}⚠️ 数据库版本号格式异常，将改用官方 latest。${NC}"
+            DB_VERSION=""
+        fi
     fi
 }
 
@@ -499,6 +663,7 @@ migrate_to_host() {
     confirm_path_and_version
     confirm_container_name
     read_db_version
+    confirm_panel_edition
     get_architecture
     
     local tmp_dir=~/1panel-install-temp
@@ -508,25 +673,17 @@ migrate_to_host() {
 
     local package_name=""
     local download_url=""
-    
-    if [[ "$DETECTED_VERSION" == "v2" ]]; then
-        local ver="${DB_VERSION:-$(curl -fsSL --proto '=https' --tlsv1.2 https://resource.fit2cloud.com/1panel/package/v2/stable/latest)}"
-        package_name="1panel-${ver}-linux-${ARCH}.tar.gz"
-        download_url="https://resource.fit2cloud.com/1panel/package/v2/stable/${ver}/release/${package_name}"
-    else
-        echo "请选择 V1 下载源:"
-        echo "1. 国内版 (China/CN) [默认]"
-        echo "2. 国际版 (Global)"
-        read -r -p "选择 [默认: 1]: " v1_source
-        v1_source=${v1_source:-1}
-        local ver="${DB_VERSION:-$(curl -fsSL --proto '=https' --tlsv1.2 https://resource.fit2cloud.com/1panel/package/stable/latest)}"
-        package_name="1panel-${ver}-linux-${ARCH}.tar.gz"
-        if [[ "$v1_source" == "2" ]]; then
-            download_url="https://resource.1panel.pro/stable/${ver}/release/${package_name}"
-        else
-            download_url="https://resource.fit2cloud.com/1panel/package/stable/${ver}/release/${package_name}"
-        fi
+    local download_base
+    local ver
+
+    download_base=$(panel_download_base "$DETECTED_VERSION" "$PANEL_EDITION") || exit 1
+    ver="${DB_VERSION:-$(curl -fsSL --proto '=https' --tlsv1.2 "${download_base}/stable/latest")}"
+    if ! is_valid_panel_version "$ver"; then
+        echo -e "${RED}版本号校验失败: ${ver}${NC}"
+        exit 1
     fi
+    package_name="1panel-${ver}-linux-${ARCH}.tar.gz"
+    download_url="${download_base}/stable/${ver}/release/${package_name}"
 
     echo "下载: ${download_url}"
     if ! download_file "${download_url}" "${package_name}"; then echo -e "${RED}下载失败${NC}"; exit 1; fi
@@ -641,27 +798,13 @@ migrate_to_docker() {
     echo -e "${YELLOW}⚠️  注意: 仅 moelin/1panel 镜像支持自动配置和重置功能。${NC}"
 
     confirm_path_and_version
+    read_db_version
+    confirm_panel_edition
 
-    local detected_tag=""
-    if command -v 1pctl &>/dev/null; then
-        local raw_ver
-        raw_ver=$(1pctl version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1)
-        [ -n "$raw_ver" ] && detected_tag="moelin/1panel:${raw_ver}"
-    fi
-    
-    echo "停止宿主机服务..."
-    svc_stop 1panel-core; svc_stop 1panel-agent; svc_stop 1panel
-    sleep 2
-    checkpoint_sqlite_wal
-    backup_data
-    clean_db_duplicates
-    clean_db_locks
+    local default_img
+    default_img=$(select_default_moelin_image "$DETECTED_VERSION" "$PANEL_EDITION" "$DB_VERSION")
 
     echo -e "${BLUE}>>> 步骤 3/4: 配置容器${NC}"
-    local default_img="moelin/1panel:latest"
-    [ -n "$detected_tag" ] && default_img="$detected_tag"
-    [ "$DETECTED_VERSION" == "v1" ] && default_img="moelin/1panel:v1"
-    
     read -r -p "请输入镜像标签 (默认: ${default_img}): " img_tag
     img_tag="${img_tag:-"$default_img"}"
 
@@ -671,7 +814,6 @@ migrate_to_docker() {
     target_container_name="${target_container_name:-"$default_name"}"
     if docker_container_exists "$target_container_name"; then
         echo -e "${RED}❌ 错误: 容器 ${target_container_name} 已存在。${NC}"
-        start_panel_services_for_version
         exit 1
     fi
 
@@ -717,7 +859,23 @@ migrate_to_docker() {
         else
             echo -e "${YELLOW}  -> 将使用默认入口: entrance${NC}"
         fi
-    else
+    fi
+
+    echo -e "${BLUE}>>> 预拉取镜像: ${img_tag}${NC}"
+    if ! docker pull "${img_tag}"; then
+        echo -e "${RED}❌ 镜像拉取失败，宿主机服务未停止。${NC}"
+        exit 1
+    fi
+
+    echo "停止宿主机服务..."
+    svc_stop 1panel-core; svc_stop 1panel-agent; svc_stop 1panel
+    sleep 2
+    checkpoint_sqlite_wal
+    backup_data
+    clean_db_duplicates
+    clean_db_locks
+
+    if [ "$use_reset" = false ]; then
         local flag_file="${PANEL_DIR}/.docker_initialized"
         if [ ! -f "$flag_file" ]; then
             echo -e "${BLUE}>>> 智能防御: 自动在 ${PANEL_DIR} 创建 .docker_initialized 防重置标志。${NC}"
@@ -726,12 +884,6 @@ migrate_to_docker() {
     fi
 
     echo -e "${BLUE}>>> 步骤 4/4: 启动容器${NC}"
-    if ! docker pull "${img_tag}"; then
-        echo -e "${RED}❌ 镜像拉取失败，正在恢复宿主机服务。${NC}"
-        start_panel_services_for_version
-        exit 1
-    fi
-
     if docker run -d --name "${target_container_name}" --restart always --network host \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v /var/lib/docker/volumes:/var/lib/docker/volumes \

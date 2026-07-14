@@ -62,6 +62,123 @@ test_dependency_package_mapping() {
         "apk should install gawk if the awk command is missing"
 }
 
+test_v2_edition_detection_from_database() {
+    local tmp_dir
+    local panel_dir
+
+    tmp_dir=$(mktemp -d)
+    TEST_TMP_DIRS+=("$tmp_dir")
+    panel_dir="$tmp_dir/1panel"
+    mkdir -p "$panel_dir/db"
+    sqlite3 "$panel_dir/db/core.db" \
+        "CREATE TABLE settings (key TEXT, value TEXT); INSERT INTO settings VALUES ('Edition', 'intl');"
+
+    assert_eq "intl" "$(read_panel_edition_from_db v2 "$panel_dir")" \
+        "V2 international edition should be detected from core.db"
+}
+
+test_v2_missing_edition_defaults_to_cn() {
+    local tmp_dir
+    local panel_dir
+
+    tmp_dir=$(mktemp -d)
+    TEST_TMP_DIRS+=("$tmp_dir")
+    panel_dir="$tmp_dir/1panel"
+    mkdir -p "$panel_dir/db"
+    sqlite3 "$panel_dir/db/core.db" "CREATE TABLE settings (key TEXT, value TEXT);"
+
+    assert_eq "cn" "$(resolve_panel_edition v2 "$panel_dir" /nonexistent/1pctl v2.1.1)" \
+        "V2 installations before v2.1.2 should default to cn when Edition is missing"
+}
+
+test_v2_1_2_or_newer_missing_edition_requires_confirmation() {
+    local tmp_dir
+    local panel_dir
+
+    tmp_dir=$(mktemp -d)
+    TEST_TMP_DIRS+=("$tmp_dir")
+    panel_dir="$tmp_dir/1panel"
+    mkdir -p "$panel_dir/db"
+    sqlite3 "$panel_dir/db/core.db" "CREATE TABLE settings (key TEXT, value TEXT);"
+
+    if resolve_panel_edition v2 "$panel_dir" /nonexistent/1pctl v2.1.2 >/dev/null; then
+        fail "V2.1.2 or newer without Edition should require explicit edition confirmation"
+    fi
+}
+
+test_edition_download_source_mapping() {
+    assert_eq "https://resource.fit2cloud.com/1panel/package/v2" \
+        "$(panel_download_base v2 cn)" "V2 cn should use the Fit2Cloud package source"
+    assert_eq "https://resource.1panel.pro/v2" \
+        "$(panel_download_base v2 intl)" "V2 intl should use the international package source"
+    assert_eq "https://resource.fit2cloud.com/1panel/package" \
+        "$(panel_download_base v1 cn)" "V1 cn should use the Fit2Cloud package source"
+    assert_eq "https://resource.1panel.pro" \
+        "$(panel_download_base v1 intl)" "V1 intl should use the international package source"
+}
+
+test_panel_version_validation() {
+    is_valid_panel_version "v2.2.3" || fail "a normal V2 version should be accepted"
+    is_valid_panel_version "v1.10.34-lts" || fail "a V1 LTS version should be accepted"
+    if is_valid_panel_version "../../latest"; then
+        fail "path-like version values must be rejected"
+    fi
+}
+
+test_moelin_image_tag_mapping() {
+    assert_eq "moelin/1panel:v2.2.3" "$(moelin_image_tag v2 cn v2.2.3)" \
+        "V2 cn should use the normal exact-version image"
+    assert_eq "moelin/1panel:global-v2.2.3" "$(moelin_image_tag v2 intl v2.2.3)" \
+        "V2 intl should use the global exact-version image"
+    assert_eq "moelin/1panel:v2" "$(moelin_image_tag v2 cn)" \
+        "V2 cn fallback should use the v2 alias"
+    assert_eq "moelin/1panel:global-v2" "$(moelin_image_tag v2 intl)" \
+        "V2 intl fallback should use the global-v2 alias"
+    assert_eq "moelin/1panel:global-v1" "$(moelin_image_tag v1 intl)" \
+        "V1 intl fallback should use the global-v1 alias"
+}
+
+test_default_image_prefers_exact_tag_when_available() {
+    local actual
+
+    actual=$(
+        # shellcheck disable=SC2317
+        docker_image_tag_exists() { return 0; }
+        select_default_moelin_image v2 intl v2.2.3
+    )
+
+    assert_eq "moelin/1panel:global-v2.2.3" "$actual" \
+        "an available exact international image should be preferred"
+}
+
+test_default_image_falls_back_to_edition_alias() {
+    local actual
+
+    actual=$(
+        # shellcheck disable=SC2317
+        docker_image_tag_exists() { return 1; }
+        select_default_moelin_image v2 intl v2.1.2 2>/dev/null
+    )
+
+    assert_eq "moelin/1panel:global-v2" "$actual" \
+        "a missing exact international image should fall back to the edition alias"
+}
+
+test_panel_edition_is_written_to_1pctl() {
+    local tmp_dir
+    local ctl_file
+
+    tmp_dir=$(mktemp -d)
+    TEST_TMP_DIRS+=("$tmp_dir")
+    ctl_file="$tmp_dir/1pctl"
+    printf 'PANEL_EDITION=cn\n' >"$ctl_file"
+
+    sync_panel_edition_to_ctl "$ctl_file" "intl"
+
+    assert_eq "PANEL_EDITION=intl" "$(sed -n '/^PANEL_EDITION=/p' "$ctl_file")" \
+        "1pctl should retain the detected international edition"
+}
+
 test_set_ctl_value_escapes_sed_replacement() {
     local tmp_dir
     local ctl_file
@@ -113,6 +230,15 @@ test_no_insecure_download_or_blanket_panel_chmod() {
 }
 
 test_dependency_package_mapping
+test_v2_edition_detection_from_database
+test_v2_missing_edition_defaults_to_cn
+test_v2_1_2_or_newer_missing_edition_requires_confirmation
+test_edition_download_source_mapping
+test_panel_version_validation
+test_moelin_image_tag_mapping
+test_default_image_prefers_exact_tag_when_available
+test_default_image_falls_back_to_edition_alias
+test_panel_edition_is_written_to_1pctl
 test_set_ctl_value_escapes_sed_replacement
 test_apply_panel_permissions_keeps_sensitive_files_private
 test_no_insecure_download_or_blanket_panel_chmod
